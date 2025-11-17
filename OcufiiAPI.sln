@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34714.143
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OcufiiAPI", "OcufiiAPI.csproj", "{7C70273D-7D09-4009-9539-C818BF8501B6}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7C70273D-7D09-4009-9539-C818BF8501B6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7C70273D-7D09-4009-9539-C818BF8501B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7C70273D-7D09-4009-9539-C818BF8501B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7C70273D-7D09-4009-9539-C818BF8501B6}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {01D11EE6-BA74-47E1-AE9F-5406FCD40FF9}
+	EndGlobalSection
+EndGlobal

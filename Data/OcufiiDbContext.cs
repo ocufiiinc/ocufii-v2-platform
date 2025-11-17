@@ -1,0 +1,240 @@
+﻿using Microsoft.EntityFrameworkCore;
+using OcufiiAPI.Models;
+
+namespace OcufiiAPI.Data
+{
+    public class OcufiiDbContext : DbContext
+    {
+        public OcufiiDbContext(DbContextOptions<OcufiiDbContext> options) : base(options) { }
+
+        public DbSet<Tenant> Tenants => Set<Tenant>();
+        public DbSet<User> Users => Set<User>();
+        public DbSet<Role> Roles => Set<Role>();
+        public DbSet<Permission> Permissions => Set<Permission>();
+        public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
+        public DbSet<Invite> Invites => Set<Invite>();
+        public DbSet<Subscription> Subscriptions => Set<Subscription>();
+        public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+        public DbSet<Billing> Billings => Set<Billing>();
+        public DbSet<Invoice> Invoices => Set<Invoice>();
+        public DbSet<Beacon> Beacons => Set<Beacon>();
+        public DbSet<Gateway> Gateways => Set<Gateway>();
+        public DbSet<Notification> Notifications => Set<Notification>();
+        public DbSet<BeaconData> BeaconData => Set<BeaconData>();
+        public DbSet<GatewayData> GatewayData => Set<GatewayData>();
+        public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+        public DbSet<Configuration> Configurations => Set<Configuration>();
+        public DbSet<CustomerSupportTicket> CustomerSupportTickets => Set<CustomerSupportTicket>();
+        public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
+        public DbSet<EmailVerification> EmailVerifications => Set<EmailVerification>();
+        public DbSet<GatewayBeacon> GatewayBeacons => Set<GatewayBeacon>();
+        public DbSet<PromoGroup> PromoGroups => Set<PromoGroup>();
+        public DbSet<PromoCode> PromoCodes => Set<PromoCode>();
+        public DbSet<ResellerDevice> ResellerDevices => Set<ResellerDevice>();
+        public DbSet<ScheduledReport> ScheduledReports => Set<ScheduledReport>();
+        public DbSet<Setting> Settings => Set<Setting>();
+        public DbSet<SnoozeSetting> SnoozeSettings => Set<SnoozeSetting>();
+        public DbSet<TermOfService> TermOfServices => Set<TermOfService>();
+        public DbSet<Thing> Things => Set<Thing>();
+        public DbSet<UserGateway> UserGateways => Set<UserGateway>();
+        public DbSet<UserNotify> UserNotifies => Set<UserNotify>();
+        public DbSet<UserPurchase> UserPurchases => Set<UserPurchase>();
+        public DbSet<WeeklySystemActivityReport> WeeklySystemActivityReports => Set<WeeklySystemActivityReport>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<Role>(entity =>
+            {
+                entity.HasKey(r => r.RoleId);
+
+                entity.Property(r => r.RoleName)
+                      .IsRequired()
+                      .HasMaxLength(50);
+
+                entity.Property(r => r.PermissionLevel)
+                      .IsRequired()
+                      .HasMaxLength(50)
+                      .HasColumnName("permission_level");                
+            });
+
+            ConfigureCompositeKeys(modelBuilder);
+            ConfigureColumnTypes(modelBuilder);
+            ConfigureRelationships(modelBuilder);
+            ConfigureConstraintsAndDefaults(modelBuilder);
+        }
+
+        private void ConfigureCompositeKeys(ModelBuilder modelBuilder)
+        {
+            // 1. beacondata
+            modelBuilder.Entity<BeaconData>()
+                .HasKey(b => new { b.UserId, b.BeaconMac, b.DateUpdated });
+
+            // 2. gatewaydata
+            modelBuilder.Entity<GatewayData>()
+                .HasKey(g => new { g.UserId, g.GatewayMac, g.DateUpdated });
+
+            // 3. notifications
+            modelBuilder.Entity<Notification>()
+                .HasKey(n => new { n.UserId, n.NotificationId, n.NotificationTimestamp });
+
+            // 4. auditlogs
+            modelBuilder.Entity<AuditLog>()
+                .HasKey(a => new { a.LogId, a.Timestamp });
+
+            // 5. beacons
+            modelBuilder.Entity<Beacon>()
+                .HasKey(b => new { b.UserId, b.BeaconMac });
+
+            // 6. gateways
+            modelBuilder.Entity<Gateway>()
+                .HasKey(g => new { g.UserId, g.GatewayMac });
+
+            // 7. gatewaybeacons
+            modelBuilder.Entity<GatewayBeacon>()
+                .HasKey(gb => new { gb.GatewayUserId, gb.GatewayMac, gb.BeaconUserId, gb.BeaconMac });
+
+            // 8. emailverification
+            modelBuilder.Entity<EmailVerification>()
+                .HasKey(ev => new { ev.UserId, ev.Token });
+
+            // 9. snoozesettings
+            modelBuilder.Entity<SnoozeSetting>()
+                .HasKey(ss => new { ss.UserId, ss.BeaconMac });
+
+            // 10. things
+            modelBuilder.Entity<Thing>()
+                .HasKey(t => new { t.UserId, t.GatewayMac });
+
+            // 11. usergateways
+            modelBuilder.Entity<UserGateway>()
+                .HasKey(ug => new { ug.UserId, ug.GatewayMac });
+
+            // 12. resellerdevices
+            modelBuilder.Entity<ResellerDevice>()
+                .HasKey(rd => new { rd.ResellerId, rd.Id });
+
+            // 13. configurations
+            modelBuilder.Entity<Configuration>()
+                .HasKey(c => new { c.ConfigurationId, c.ModeType });
+
+            // 14. scheduledreports
+            modelBuilder.Entity<ScheduledReport>()
+                .HasKey(sr => new { sr.ScheduledReportId, sr.ReportType });
+        }
+
+        private void ConfigureColumnTypes(ModelBuilder modelBuilder)
+        {
+            // === jsonb columns ===
+            modelBuilder.Entity<Tenant>()
+                .Property(t => t.ThemeConfig).HasColumnType("jsonb");
+            modelBuilder.Entity<Tenant>()
+                .Property(t => t.CustomWorkflows).HasColumnType("jsonb");
+
+            modelBuilder.Entity<FeatureFlag>()
+                .Property(f => f.Config).HasColumnType("jsonb");
+
+            modelBuilder.Entity<Beacon>()
+                .Property(b => b.ConfigurationDetail).HasColumnType("jsonb");
+
+            modelBuilder.Entity<Gateway>()
+                .Property(g => g.WifiSettings).HasColumnType("jsonb");
+            modelBuilder.Entity<Gateway>()
+                .Property(g => g.ConfigurationDetail).HasColumnType("jsonb");
+
+            modelBuilder.Entity<CustomerSupportTicket>()
+                .Property(c => c.Attachments).HasColumnType("jsonb");
+
+            modelBuilder.Entity<Configuration>()
+                .Property(c => c.ConfigurationData).HasColumnType("jsonb").IsRequired();
+
+            modelBuilder.Entity<AuditLog>()
+                .Property(a => a.Details).HasColumnType("jsonb");
+
+            modelBuilder.Entity<GatewayData>()
+                .Property(g => g.Data).HasColumnType("jsonb");
+
+            // === timestamp with time zone ===
+            var dateTimeProperties = modelBuilder.Model.GetEntityTypes()
+                .SelectMany(e => e.GetProperties())
+                .Where(p => p.ClrType == typeof(DateTime) || p.ClrType == typeof(DateTime?))
+                .Where(p => p.Name.Contains("Date") ||
+                           p.Name.Contains("Time") ||
+                           p.Name.Contains("Timestamp") ||
+                           p.Name.Contains("Created") ||
+                           p.Name.Contains("Updated"));
+
+            foreach (var property in dateTimeProperties)
+            {
+                property.SetColumnType("timestamp with time zone");
+            }
+        }
+
+        private void ConfigureRelationships(ModelBuilder modelBuilder)
+        {
+            // User → Tenant
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.Tenant)
+                .WithMany(t => t.Users)
+                .HasForeignKey(u => u.TenantId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // User → Role
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.Role)
+                .WithMany(r => r.Users)
+                .HasForeignKey(u => u.RoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Beacon → User
+            modelBuilder.Entity<Beacon>()
+                .HasOne(b => b.User)
+                .WithMany(u => u.Beacons)
+                .HasForeignKey(b => b.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Gateway → User
+            modelBuilder.Entity<Gateway>()
+                .HasOne(g => g.User)
+                .WithMany(u => u.Gateways)
+                .HasForeignKey(g => g.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // BeaconData → Beacon
+            modelBuilder.Entity<BeaconData>()
+                .HasOne(bd => bd.Beacon)
+                .WithMany(b => b.BeaconData)
+                .HasForeignKey(bd => new { bd.UserId, bd.BeaconMac })
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // GatewayData → Gateway
+            modelBuilder.Entity<GatewayData>()
+                .HasOne(gd => gd.Gateway)
+                .WithMany(g => g.GatewayData)
+                .HasForeignKey(gd => new { gd.UserId, gd.GatewayMac })
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Notification → User
+            modelBuilder.Entity<Notification>()
+                .HasOne(n => n.User)
+                .WithMany(u => u.Notifications)
+                .HasForeignKey(n => n.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Add more as needed...
+        }
+
+        private void ConfigureConstraintsAndDefaults(ModelBuilder modelBuilder)
+        {
+            // Default values
+            modelBuilder.Entity<Tenant>()
+                .Property(t => t.DateCreated).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            modelBuilder.Entity<Tenant>()
+                .Property(t => t.DateUpdated).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            modelBuilder.Entity<Role>()
+                .Property(r => r.RoleId).UseIdentityAlwaysColumn(); 
+        }
+    }
+}
