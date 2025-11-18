@@ -27,7 +27,7 @@ services:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: TestDevWeb
-      ConnectionStrings__OcufiiConnection: "Host=db;Database=ocufii;Username=postgres;Password=salman;Port=5432;"
+      ConnectionStrings__OcufiiConnection: "Host=db;Database=ocufii;Username=postgres;Password=ps19;Port=5432;"
     ports:
       - "8080:80"   # API will be available on http://<server-ip>:8080
     restart: unless-stopped
