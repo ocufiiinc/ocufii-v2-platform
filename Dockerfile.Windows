@@ -1,0 +1,25 @@
+﻿# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:8.0-windowsservercore-ltsc2022 AS build
+WORKDIR /src
+
+# Copy csproj and restore
+COPY *.csproj ./
+RUN dotnet restore
+
+# Copy everything and publish
+COPY . ./
+RUN dotnet publish -c Release -o /app/publish
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-windowsservercore-ltsc2022 AS runtime
+WORKDIR /app
+
+# Copy published files from build stage
+COPY --from=build /app/publish .
+
+# Set environment for test server
+ENV ASPNETCORE_ENVIRONMENT=TestDevWeb
+EXPOSE 80
+
+# Run the API
+ENTRYPOINT ["dotnet", "OcufiiAPI.dll"]
