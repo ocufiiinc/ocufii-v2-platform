@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OcufiiAPI.Data;
@@ -11,9 +12,11 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    partial class OcufiiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251118084111_AddRefreshToken")]
+    partial class AddRefreshToken
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -718,8 +721,7 @@ namespace OcufiiAPI.Migrations
 
                     b.Property<string>("Token")
                         .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
@@ -1593,7 +1595,7 @@ namespace OcufiiAPI.Migrations
             modelBuilder.Entity("OcufiiAPI.Models.RefreshToken", b =>
                 {
                     b.HasOne("OcufiiAPI.Models.User", "User")
-                        .WithMany("RefreshTokens")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -1827,8 +1829,6 @@ namespace OcufiiAPI.Migrations
                     b.Navigation("Notifications");
 
                     b.Navigation("Purchases");
-
-                    b.Navigation("RefreshTokens");
 
                     b.Navigation("SentInvites");
 

@@ -46,6 +46,8 @@ namespace OcufiiAPI.Models
 
         public Guid? TenantId { get; set; }
 
+        public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+
         [StringLength(20)]
         public string AccountType { get; set; } = "single"; // single | multi
 

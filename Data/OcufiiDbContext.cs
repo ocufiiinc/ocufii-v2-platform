@@ -41,8 +41,28 @@ namespace OcufiiAPI.Data
         public DbSet<UserPurchase> UserPurchases => Set<UserPurchase>();
         public DbSet<WeeklySystemActivityReport> WeeklySystemActivityReports => Set<WeeklySystemActivityReport>();
 
+        public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<RefreshToken>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.Token).IsUnique();
+                entity.HasIndex(e => e.UserId);
+
+                entity.Property(e => e.Token).IsRequired().HasMaxLength(255);
+                entity.Property(e => e.ExpiresAt).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("NOW()");
+                entity.Property(e => e.IsActive).HasDefaultValue(true);
+
+                // Define relationship
+                entity.HasOne(d => d.User)
+                      .WithMany(u => u.RefreshTokens)
+                      .HasForeignKey(d => d.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
             base.OnModelCreating(modelBuilder);
 
             modelBuilder.Entity<Role>(entity =>

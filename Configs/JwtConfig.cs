@@ -6,5 +6,7 @@
         public string Issuer { get; set; } = "OcufiiAPI";
         public string Audience { get; set; } = "OcufiiClients";
         public int ExpiryMinutes { get; set; } = 60;
+        public int AccessTokenMinutes { get; set; } = 60;
+        public int RefreshTokenDays { get; set; } = 30;
     }
 }
