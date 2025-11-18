@@ -43,7 +43,6 @@ public class AuthController : ControllerBase
         _legacy = legacyOptions.Value;
     }
 
-    // POST /api/auth/login
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
@@ -142,7 +141,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    // POST /api/auth/refresh
     [HttpPost("refresh")]
     [Authorize]
     public async Task<IActionResult> Refresh([FromBody] RefreshDto dto)
@@ -182,7 +180,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    // POST /api/auth/logout
     [HttpPost("logout")]
     [Authorize]
     public async Task<IActionResult> Logout([FromBody] RefreshDto dto)
@@ -202,8 +199,7 @@ public class AuthController : ControllerBase
         return Ok(new ApiResponse(true, "Logged out successfully"));
     }
 
-    // GET /api/auth/{email}
-    [HttpGet("{email}")]
+    [HttpGet("/validate-email/{email}")]
     public async Task<IActionResult> ValidateEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email) || !new EmailAddressAttribute().IsValid(email))
@@ -218,23 +214,23 @@ public class AuthController : ControllerBase
     }
 
     [HttpPut("change-password")]
-[Authorize]
-public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
-{
-    var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-    var user = await _userRepo.GetByIdAsync(userId);
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+    {
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var user = await _userRepo.GetByIdAsync(userId);
 
-    var verify = _hasher.VerifyHashedPassword(user!, user!.Password, dto.CurrentPassword);
-    if (verify == PasswordVerificationResult.Failed)
-        return BadRequest(new ApiResponse(false, "Current password is incorrect"));
+        var verify = _hasher.VerifyHashedPassword(user!, user!.Password, dto.CurrentPassword);
+        if (verify == PasswordVerificationResult.Failed)
+            return BadRequest(new ApiResponse(false, "Current password is incorrect"));
 
-    user.Password = _hasher.HashPassword(user, dto.NewPassword);
-    user.DateUpdated = DateTime.UtcNow;
-    _userRepo.Update(user);
-    await _userRepo.SaveAsync();
+        user.Password = _hasher.HashPassword(user, dto.NewPassword);
+        user.DateUpdated = DateTime.UtcNow;
+        _userRepo.Update(user);
+        await _userRepo.SaveAsync();
 
-    return Ok(new ApiResponse(true, "Password changed successfully"));
-}
+        return Ok(new ApiResponse(true, "Password changed successfully"));
+    }
 
     [HttpPut("change-email")]
     [Authorize]
@@ -265,12 +261,11 @@ public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto
         return Ok(new ApiResponse(true, "Email changed successfully"));
     }
 
-    // GET /api/auth/me
     [HttpGet("me")]
-[Authorize]
-public async Task<IActionResult> GetProfile()
-{
-    var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+    [Authorize]
+    public async Task<IActionResult> GetProfile()
+    {
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var user = (await _userRepo.FindAsync(u => u.UserId == userId))
                     .Select(u => new
                     {
@@ -286,10 +281,10 @@ public async Task<IActionResult> GetProfile()
                     .FirstOrDefault();
 
         return Ok(new ApiResponse(true, "Profile retrieved")
-    {
-        Data = user
-    });
-}
+        {
+            Data = user
+        });
+    }
 
     // Private Helpers
     private (string accessToken, string refreshToken) GenerateTokens(User user)

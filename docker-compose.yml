@@ -1,0 +1,36 @@
+﻿services:
+  db:
+    image: postgres:18
+    container_name: ocufiiapi-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: salman
+      POSTGRES_DB: ocufii
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18+ requires mount at /var/lib/postgresql
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+    container_name: ocufiiapi-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Important: use service name "db" as the host inside Docker
+      ConnectionStrings__DefaultConnection: "Host=db;Database=ocufii;Username=postgres;Password=salman;Port=5432;"
+    ports:
+      - "8080:80"
+    restart: on-failure
+
+volumes:
+  pg_data:
