@@ -10,7 +10,6 @@ namespace OcufiiAPI.Controllers
 {
     [ApiController]
     [Route("api/users")]
-    [Authorize]
     public class UsersController : ControllerBase
     {
         private readonly IRepository<User> _userRepo;
@@ -23,6 +22,7 @@ namespace OcufiiAPI.Controllers
         }
 
         // GET /api/users/{id}
+        [Authorize]
         [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetById(Guid id)
         {
@@ -75,7 +75,7 @@ namespace OcufiiAPI.Controllers
 
         // PATCH /api/users/{id}
         [HttpPatch("{id:guid}")]
-        [Authorize(Roles = "admin")]
+        [Authorize(Policy = "CanEditOwnProfile")]
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProfileDto dto)
         {
             var user = await _userRepo.GetByIdAsync(id);
@@ -111,6 +111,7 @@ namespace OcufiiAPI.Controllers
 
         // PATCH /api/users/me
         [HttpPatch("me")]
+        [Authorize(Policy = "CanEditOwnProfile")]
         public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileDto dto)
         {
             var userId = User.GetUserId();
@@ -131,7 +132,7 @@ namespace OcufiiAPI.Controllers
 
         // DELETE /api/users/{id}
         [HttpDelete("{id:guid}")]
-        [Authorize(Roles = "admin")]
+        [Authorize(Policy = "CanEditOwnProfile")]
         public async Task<IActionResult> Delete(Guid id)
         {
             var user = await _userRepo.GetByIdAsync(id);

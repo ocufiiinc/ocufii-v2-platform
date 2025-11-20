@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -12,10 +12,12 @@ using OcufiiAPI.Repositories;
 using Microsoft.AspNetCore.Diagnostics;
 using OcufiiAPI.Data;
 using Microsoft.OpenApi.Models;
+using OcufiiAPI.Handler;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ==================== SERILOG � CLEAN STRUCTURED LOGS ====================
+// ==================== SERILOG – CLEAN STRUCTURED LOGS ====================
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
@@ -33,7 +35,7 @@ builder.Host.UseSerilog();
 // ==================== SERVICES ====================
 builder.Services.AddControllers();
 
-// FluentValidation � auto-discover all validators
+// FluentValidation – auto-discover all validators
 builder.Services.AddFluentValidation(fv =>
 {
     fv.RegisterValidatorsFromAssemblyContaining<Program>();
@@ -78,6 +80,8 @@ builder.Services.AddDbContext<OcufiiDbContext>(options =>
 
 // Repositories
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+builder.Services.AddHttpContextAccessor();                                   // ← REQUIRED
+builder.Services.AddScoped<IAuthorizationHandler, SameUserOrAdminHandler>(); // ← YOUR HANDLER
 
 // Configs
 builder.Services.Configure<JwtConfig>(builder.Configuration.GetSection("Jwt"));
@@ -103,11 +107,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.Configure<SettingsDefaultsConfig>(builder.Configuration.GetSection("SettingsDefaults"));
 builder.Services.Configure<AssistDefaultsConfig>(builder.Configuration.GetSection("AssistDefaults"));
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CanEditOwnProfile", policy =>
+        policy.AddRequirements(new SameUserOrAdminRequirement()));
+});
 
 var app = builder.Build();
 
-// ==================== GLOBAL EXCEPTION HANDLER � CLEAN JSON ERRORS ====================
+// ==================== GLOBAL EXCEPTION HANDLER – CLEAN JSON ERRORS ====================
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
