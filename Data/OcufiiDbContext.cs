@@ -65,6 +65,23 @@ namespace OcufiiAPI.Data
 
             base.OnModelCreating(modelBuilder);
 
+            modelBuilder.Entity<Setting>(entity =>
+            {
+                entity.HasKey(e => e.UserId);
+                entity.Property(e => e.AssistSettings)
+                      .HasColumnType("jsonb")
+                      .HasDefaultValue("{}");
+                entity.Property(e => e.NotificationSound)
+                      .HasDefaultValue("DEFAULT");
+                entity.Property(e => e.AutoLogoutInterval)
+                      .HasDefaultValue(15);
+            });
+
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.Setting)
+                .WithOne(s => s.User)
+                .HasForeignKey<Setting>(s => s.UserId);
+
             modelBuilder.Entity<Role>(entity =>
             {
                 entity.HasKey(r => r.RoleId);

@@ -4,30 +4,23 @@ namespace OcufiiAPI.Models
 {
     public class Setting
     {
-        [Key]
         public Guid UserId { get; set; }
+        public bool MovementSound { get; set; } = true;
+        public bool MovementVibration { get; set; } = true;
+        public string NotificationSound { get; set; } = "DEFAULT";
+        public bool AutoLogoutEnabled { get; set; } = false;
+        public int AutoLogoutInterval { get; set; } = 15;
+        public bool BypassFocus { get; set; } = false;
+        public string? PersonalSafetyUsername { get; set; }
 
-        public bool? ActiveShooter { get; set; }
-        public bool? AutoLogout { get; set; }
-        public int? AutoLogoutInterval { get; set; }
-        public bool? BypassFocus { get; set; }
-        public bool? Distress { get; set; }
-        public bool? Emergency { get; set; }
-        public bool? Emergency911 { get; set; }
-        public bool? MovementSound { get; set; }
-        public bool? MovementVibration { get; set; }
-        public bool? PersonalSafety { get; set; }
-
-        [StringLength(100)]
-        public string? PersonalSafetyUserName { get; set; }
-
-        public bool? Sound { get; set; }
+        // ToS
         public Guid? TosId { get; set; }
-
-        [StringLength(50)]
         public string? TosVersion { get; set; }
+        public DateTime? TermsAcceptedAt { get; set; }
+
+        // Assist Settings (JSON column)
+        public string? AssistSettings { get; set; } = "{}"; // JSON string
 
         public User User { get; set; } = null!;
-        public TermOfService? TermOfService { get; set; }
     }
 }

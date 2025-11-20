@@ -51,6 +51,8 @@ namespace OcufiiAPI.Models
         [StringLength(20)]
         public string AccountType { get; set; } = "single"; // single | multi
 
+        public Setting? Setting { get; set; }
+
         // Navigation
         public Tenant? Tenant { get; set; }
         public Role Role { get; set; } = null!;
