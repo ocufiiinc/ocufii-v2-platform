@@ -100,6 +100,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+builder.Services.Configure<SettingsDefaultsConfig>(builder.Configuration.GetSection("SettingsDefaults"));
+builder.Services.Configure<AssistDefaultsConfig>(builder.Configuration.GetSection("AssistDefaults"));
+
 builder.Services.AddAuthorization();
 
 var app = builder.Build();

@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace OcufiiAPI.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate_SnakeCase_Final : Migration
+    public partial class InitialCreate_Perfect_Final : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -531,6 +531,28 @@ namespace OcufiiAPI.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "RefreshTokens",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Token = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "NOW()"),
+                    IsActive = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RefreshTokens", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_RefreshTokens_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "TermOfServices",
                 columns: table => new
                 {
@@ -549,6 +571,25 @@ namespace OcufiiAPI.Migrations
                         column: x => x.CreatedByUserUserId,
                         principalTable: "Users",
                         principalColumn: "UserId");
+                });
+
+            migrationBuilder.CreateTable(
+                name: "UserAssistSettings",
+                columns: table => new
+                {
+                    user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Config = table.Column<string>(type: "jsonb", nullable: false, defaultValue: "{}"),
+                    personal_safety_username = table.Column<string>(type: "text", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserAssistSettings", x => x.user_id);
+                    table.ForeignKey(
+                        name: "FK_UserAssistSettings_Users_user_id",
+                        column: x => x.user_id,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -598,6 +639,36 @@ namespace OcufiiAPI.Migrations
                     table.ForeignKey(
                         name: "FK_UserPurchases_Users_UserId",
                         column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "UserSettings",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    MovementSound = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
+                    MovementVibration = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
+                    NotificationSound = table.Column<string>(type: "text", nullable: false, defaultValue: "DEFAULT"),
+                    AutoLogoutEnabled = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    AutoLogoutInterval = table.Column<int>(type: "integer", nullable: false, defaultValue: 15),
+                    BypassFocus = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    personal_safety_username = table.Column<string>(type: "text", nullable: true),
+                    TosId = table.Column<Guid>(type: "uuid", nullable: true),
+                    TosVersion = table.Column<string>(type: "text", nullable: true),
+                    TermsAcceptedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserSettings", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_UserSettings_Users_user_id",
+                        column: x => x.user_id,
                         principalTable: "Users",
                         principalColumn: "UserId",
                         onDelete: ReferentialAction.Cascade);
@@ -832,22 +903,19 @@ namespace OcufiiAPI.Migrations
                 columns: table => new
                 {
                     UserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    ActiveShooter = table.Column<bool>(type: "boolean", nullable: true),
-                    AutoLogout = table.Column<bool>(type: "boolean", nullable: true),
-                    AutoLogoutInterval = table.Column<int>(type: "integer", nullable: true),
-                    BypassFocus = table.Column<bool>(type: "boolean", nullable: true),
-                    Distress = table.Column<bool>(type: "boolean", nullable: true),
-                    Emergency = table.Column<bool>(type: "boolean", nullable: true),
-                    Emergency911 = table.Column<bool>(type: "boolean", nullable: true),
-                    MovementSound = table.Column<bool>(type: "boolean", nullable: true),
-                    MovementVibration = table.Column<bool>(type: "boolean", nullable: true),
-                    PersonalSafety = table.Column<bool>(type: "boolean", nullable: true),
-                    PersonalSafetyUserName = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    Sound = table.Column<bool>(type: "boolean", nullable: true),
+                    MovementSound = table.Column<bool>(type: "boolean", nullable: false),
+                    MovementVibration = table.Column<bool>(type: "boolean", nullable: false),
+                    NotificationSound = table.Column<string>(type: "text", nullable: false, defaultValue: "DEFAULT"),
+                    AutoLogoutEnabled = table.Column<bool>(type: "boolean", nullable: false),
+                    AutoLogoutInterval = table.Column<int>(type: "integer", nullable: false, defaultValue: 15),
+                    BypassFocus = table.Column<bool>(type: "boolean", nullable: false),
+                    PersonalSafetyUsername = table.Column<string>(type: "text", nullable: true),
                     TosId = table.Column<Guid>(type: "uuid", nullable: true),
-                    TosVersion = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
-                    UserId1 = table.Column<Guid>(type: "uuid", nullable: false),
-                    TermOfServiceTosId = table.Column<Guid>(type: "uuid", nullable: true)
+                    TosVersion = table.Column<string>(type: "text", nullable: true),
+                    TermsAcceptedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    AssistSettings = table.Column<string>(type: "jsonb", nullable: true, defaultValue: "{}"),
+                    TermOfServiceTosId = table.Column<Guid>(type: "uuid", nullable: true),
+                    UserId1 = table.Column<Guid>(type: "uuid", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -858,11 +926,16 @@ namespace OcufiiAPI.Migrations
                         principalTable: "TermOfServices",
                         principalColumn: "TosId");
                     table.ForeignKey(
-                        name: "FK_Settings_Users_UserId1",
-                        column: x => x.UserId1,
+                        name: "FK_Settings_Users_UserId",
+                        column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
                         onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_Settings_Users_UserId1",
+                        column: x => x.UserId1,
+                        principalTable: "Users",
+                        principalColumn: "UserId");
                 });
 
             migrationBuilder.CreateIndex(
@@ -947,6 +1020,17 @@ namespace OcufiiAPI.Migrations
                 column: "SubscriptionId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_Token",
+                table: "RefreshTokens",
+                column: "Token",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_UserId",
+                table: "RefreshTokens",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Settings_TermOfServiceTosId",
                 table: "Settings",
                 column: "TermOfServiceTosId");
@@ -995,6 +1079,12 @@ namespace OcufiiAPI.Migrations
                 name: "IX_Users_TenantId",
                 table: "Users",
                 column: "TenantId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UserSettings_user_id",
+                table: "UserSettings",
+                column: "user_id",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_UserSubscriptions_SubscriptionId",
@@ -1053,6 +1143,9 @@ namespace OcufiiAPI.Migrations
                 name: "PromoCodes");
 
             migrationBuilder.DropTable(
+                name: "RefreshTokens");
+
+            migrationBuilder.DropTable(
                 name: "ResellerDevices");
 
             migrationBuilder.DropTable(
@@ -1068,6 +1161,9 @@ namespace OcufiiAPI.Migrations
                 name: "Things");
 
             migrationBuilder.DropTable(
+                name: "UserAssistSettings");
+
+            migrationBuilder.DropTable(
                 name: "UserGateways");
 
             migrationBuilder.DropTable(
@@ -1075,6 +1171,9 @@ namespace OcufiiAPI.Migrations
 
             migrationBuilder.DropTable(
                 name: "UserPurchases");
+
+            migrationBuilder.DropTable(
+                name: "UserSettings");
 
             migrationBuilder.DropTable(
                 name: "UserSubscriptions");

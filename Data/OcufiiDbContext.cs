@@ -40,6 +40,8 @@ namespace OcufiiAPI.Data
         public DbSet<UserNotify> UserNotifies => Set<UserNotify>();
         public DbSet<UserPurchase> UserPurchases => Set<UserPurchase>();
         public DbSet<WeeklySystemActivityReport> WeeklySystemActivityReports => Set<WeeklySystemActivityReport>();
+        public DbSet<UserSetting> UserSettings { get; set; } = null!;
+        public DbSet<UserAssistSetting> UserAssistSettings { get; set; } = null!;
 
         public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
 
@@ -65,6 +67,65 @@ namespace OcufiiAPI.Data
 
             base.OnModelCreating(modelBuilder);
 
+            modelBuilder.Entity<UserSetting>(entity =>
+            {
+                entity.ToTable("UserSettings");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.UserId).IsUnique();
+
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.UserId).HasColumnName("user_id");
+
+                entity.Property(e => e.MovementSound).HasDefaultValue(true);
+                entity.Property(e => e.MovementVibration).HasDefaultValue(true);
+                entity.Property(e => e.AutoLogoutEnabled).HasDefaultValue(false);
+                entity.Property(e => e.AutoLogoutInterval).HasDefaultValue(15);
+                entity.Property(e => e.BypassFocus).HasDefaultValue(false);
+
+                entity.Property(e => e.NotificationSound)
+                      .HasConversion<string>()
+                      .HasDefaultValue(NotificationSoundType.DEFAULT);
+
+                entity.Property(e => e.PersonalSafetyUsername)
+                      .HasColumnName("personal_safety_username");
+
+                entity.Property(e => e.TosId).HasColumnName("TosId");
+                entity.Property(e => e.TosVersion).HasColumnName("TosVersion");
+                entity.Property(e => e.TermsAcceptedAt).HasColumnName("TermsAcceptedAt");
+
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+                entity.HasOne(d => d.User)
+                      .WithMany()
+                      .HasForeignKey(d => d.UserId)
+                      .HasPrincipalKey(u => u.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // UserAssistSettings — PERFECT MAPPING
+            modelBuilder.Entity<UserAssistSetting>(entity =>
+            {
+                entity.ToTable("UserAssistSettings");
+                entity.HasKey(e => e.UserId);
+
+                entity.Property(e => e.UserId).HasColumnName("user_id");
+
+                entity.Property(e => e.Config)
+                      .HasColumnName("Config")
+                      .HasColumnType("jsonb")
+                      .HasDefaultValue("{}");
+
+                entity.Property(e => e.PersonalSafetyUsername)
+                      .HasColumnName("personal_safety_username");
+
+                entity.HasOne(d => d.User)
+                      .WithMany()
+                      .HasForeignKey(d => d.UserId)
+                      .HasPrincipalKey(u => u.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
             modelBuilder.Entity<Setting>(entity =>
             {
                 entity.HasKey(e => e.UserId);
@@ -72,7 +133,8 @@ namespace OcufiiAPI.Data
                       .HasColumnType("jsonb")
                       .HasDefaultValue("{}");
                 entity.Property(e => e.NotificationSound)
-                      .HasDefaultValue("DEFAULT");
+                      .HasConversion<string>()
+                      .HasDefaultValue(NotificationSoundType.DEFAULT);
                 entity.Property(e => e.AutoLogoutInterval)
                       .HasDefaultValue(15);
             });
@@ -95,6 +157,14 @@ namespace OcufiiAPI.Data
                       .HasMaxLength(50)
                       .HasColumnName("permission_level");                
             });
+
+            foreach (var entity in modelBuilder.Model.GetEntityTypes())
+            {
+                foreach (var fk in entity.GetForeignKeys())
+                {
+                    fk.PrincipalKey.IsPrimaryKey();
+                }
+            }
 
             ConfigureCompositeKeys(modelBuilder);
             ConfigureColumnTypes(modelBuilder);

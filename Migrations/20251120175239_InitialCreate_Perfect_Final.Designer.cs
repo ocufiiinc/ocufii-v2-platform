@@ -12,8 +12,8 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    [Migration("20251118091101_FixRefreshTokenRelationship")]
-    partial class FixRefreshTokenRelationship
+    [Migration("20251120175239_InitialCreate_Perfect_Final")]
+    partial class InitialCreate_Perfect_Final
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -811,57 +811,52 @@ namespace OcufiiAPI.Migrations
             modelBuilder.Entity("OcufiiAPI.Models.Setting", b =>
                 {
                     b.Property<Guid>("UserId")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<bool?>("ActiveShooter")
+                    b.Property<string>("AssistSettings")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("{}");
+
+                    b.Property<bool>("AutoLogoutEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<bool?>("AutoLogout")
+                    b.Property<int>("AutoLogoutInterval")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(15);
+
+                    b.Property<bool>("BypassFocus")
                         .HasColumnType("boolean");
 
-                    b.Property<int?>("AutoLogoutInterval")
-                        .HasColumnType("integer");
-
-                    b.Property<bool?>("BypassFocus")
+                    b.Property<bool>("MovementSound")
                         .HasColumnType("boolean");
 
-                    b.Property<bool?>("Distress")
+                    b.Property<bool>("MovementVibration")
                         .HasColumnType("boolean");
 
-                    b.Property<bool?>("Emergency")
-                        .HasColumnType("boolean");
+                    b.Property<string>("NotificationSound")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("DEFAULT");
 
-                    b.Property<bool?>("Emergency911")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool?>("MovementSound")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool?>("MovementVibration")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool?>("PersonalSafety")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("PersonalSafetyUserName")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<bool?>("Sound")
-                        .HasColumnType("boolean");
+                    b.Property<string>("PersonalSafetyUsername")
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("TermOfServiceTosId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("TermsAcceptedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("TosId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("TosVersion")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                        .HasColumnType("text");
 
-                    b.Property<Guid>("UserId1")
+                    b.Property<Guid?>("UserId1")
                         .HasColumnType("uuid");
 
                     b.HasKey("UserId");
@@ -1130,6 +1125,28 @@ namespace OcufiiAPI.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("OcufiiAPI.Models.UserAssistSetting", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Config")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("{}")
+                        .HasColumnName("Config");
+
+                    b.Property<string>("PersonalSafetyUsername")
+                        .HasColumnType("text")
+                        .HasColumnName("personal_safety_username");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("UserAssistSettings", (string)null);
+                });
+
             modelBuilder.Entity("OcufiiAPI.Models.UserGateway", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -1247,6 +1264,82 @@ namespace OcufiiAPI.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("UserPurchases");
+                });
+
+            modelBuilder.Entity("OcufiiAPI.Models.UserSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<bool>("AutoLogoutEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("AutoLogoutInterval")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(15);
+
+                    b.Property<bool>("BypassFocus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<bool>("MovementSound")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("MovementVibration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("NotificationSound")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("DEFAULT");
+
+                    b.Property<string>("PersonalSafetyUsername")
+                        .HasColumnType("text")
+                        .HasColumnName("personal_safety_username");
+
+                    b.Property<DateTime?>("TermsAcceptedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("TermsAcceptedAt");
+
+                    b.Property<Guid?>("TosId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("TosId");
+
+                    b.Property<string>("TosVersion")
+                        .HasColumnType("text")
+                        .HasColumnName("TosVersion");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserSettings", (string)null);
                 });
 
             modelBuilder.Entity("OcufiiAPI.Models.UserSubscription", b =>
@@ -1617,17 +1710,19 @@ namespace OcufiiAPI.Migrations
 
             modelBuilder.Entity("OcufiiAPI.Models.Setting", b =>
                 {
-                    b.HasOne("OcufiiAPI.Models.TermOfService", "TermOfService")
+                    b.HasOne("OcufiiAPI.Models.TermOfService", null)
                         .WithMany("Settings")
                         .HasForeignKey("TermOfServiceTosId");
 
                     b.HasOne("OcufiiAPI.Models.User", "User")
-                        .WithMany("Settings")
-                        .HasForeignKey("UserId1")
+                        .WithOne("Setting")
+                        .HasForeignKey("OcufiiAPI.Models.Setting", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("TermOfService");
+                    b.HasOne("OcufiiAPI.Models.User", null)
+                        .WithMany("Settings")
+                        .HasForeignKey("UserId1");
 
                     b.Navigation("User");
                 });
@@ -1693,6 +1788,17 @@ namespace OcufiiAPI.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("OcufiiAPI.Models.UserAssistSetting", b =>
+                {
+                    b.HasOne("OcufiiAPI.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("OcufiiAPI.Models.UserGateway", b =>
                 {
                     b.HasOne("OcufiiAPI.Models.User", "User")
@@ -1725,6 +1831,17 @@ namespace OcufiiAPI.Migrations
                 {
                     b.HasOne("OcufiiAPI.Models.User", "User")
                         .WithMany("Purchases")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OcufiiAPI.Models.UserSetting", b =>
+                {
+                    b.HasOne("OcufiiAPI.Models.User", "User")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -1834,6 +1951,8 @@ namespace OcufiiAPI.Migrations
                     b.Navigation("RefreshTokens");
 
                     b.Navigation("SentInvites");
+
+                    b.Navigation("Setting");
 
                     b.Navigation("Settings");
 
