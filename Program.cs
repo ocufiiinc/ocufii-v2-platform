@@ -166,7 +166,8 @@ app.UseExceptionHandler(errorApp =>
 });
 
 // ==================== PIPELINE ====================
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() ||
+    app.Environment.EnvironmentName.Equals("TestDevWeb", StringComparison.OrdinalIgnoreCase))
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
@@ -175,6 +176,15 @@ if (app.Environment.IsDevelopment())
         c.RoutePrefix = "swagger";
     });
 }
+
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/swagger"))
+    {
+        context.Response.Headers.Append("X-Environment", app.Environment.EnvironmentName);
+    }
+    await next();
+});
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
