@@ -191,4 +191,11 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+// ===== AUTO RUN MIGRATIONS =====
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<OcufiiDbContext>();
+    db.Database.Migrate();
+}
+
 app.Run();
