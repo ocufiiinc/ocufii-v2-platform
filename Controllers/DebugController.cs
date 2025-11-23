@@ -1,10 +1,7 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
 using OcufiiAPI.Models;
-using OcufiiAPI.Configs;
-using System.Reflection;
 
 namespace OcufiiAPI.Controllers
 {
@@ -14,47 +11,153 @@ namespace OcufiiAPI.Controllers
     {
         private readonly OcufiiDbContext _db;
         private readonly IWebHostEnvironment _env;
-        private readonly ILogger<DebugController> _logger;
 
-        public DebugController(OcufiiDbContext db, IWebHostEnvironment env, ILogger<DebugController> logger)
+        public DebugController(OcufiiDbContext db, IWebHostEnvironment env)
         {
             _db = db;
             _env = env;
-            _logger = logger;
         }
 
-        private bool IsAllowed => _env.IsDevelopment() ||
-                                  _env.EnvironmentName.Equals("TestDevWeb", StringComparison.OrdinalIgnoreCase);
+        private bool AllowAll => _env.IsDevelopment() ||
+                                 _env.EnvironmentName.Equals("TestDevWeb", StringComparison.OrdinalIgnoreCase);
 
-        // GET /api/debug/status → NO TOKEN NEEDED
         [HttpGet("status")]
-        [AllowAnonymous] // ← Anyone can check if debug is active
         public IActionResult Status()
         {
-            if (!IsAllowed) return Forbid();
-
+            if (!AllowAll) return Forbid();
             return Ok(new
             {
                 Environment = _env.EnvironmentName,
-                Timestamp = DateTime.UtcNow,
-                Message = "Debug API ACTIVE — Use with admin token"
+                DebugMode = "ACTIVE — NO AUTH — FULL POWER",
+                Endpoints = new[]
+                {
+                    "GET    /api/debug/tables",
+                    "GET    /api/debug/table/{name}",
+                    "POST   /api/debug/delete-user-by-email",
+                    "POST   /api/debug/seed/roles",
+                    "POST   /api/debug/seed/tenant"
+                }
             });
         }
 
-        // ALL OTHER ENDPOINTS REQUIRE ADMIN TOKEN
+        [HttpGet("tables")]
+        public IActionResult GetTables()
+        {
+            if (!AllowAll) return Forbid();
+
+            var tables = _db.Model.GetEntityTypes()
+                .Select(t => t.GetTableName())
+                .Where(n => n != null)
+                .OrderBy(n => n)
+                .ToList();
+
+            return Ok(new { count = tables.Count, tables });
+        }
+
+        [HttpGet("table/{tableName}")]
+        public async Task<IActionResult> DumpTable(string tableName)
+        {
+            if (!AllowAll) return Forbid();
+
+            var entityType = _db.Model.GetEntityTypes()
+                .FirstOrDefault(t => string.Equals(t.GetTableName(), tableName, StringComparison.OrdinalIgnoreCase));
+
+            if (entityType == null)
+                return NotFound($"Table '{tableName}' not found in DbContext");
+
+            try
+            {
+                var sql = $"SELECT * FROM \"{tableName}\"";
+                var connection = _db.Database.GetDbConnection();
+                var wasOpen = connection.State == System.Data.ConnectionState.Open;
+                if (!wasOpen) await connection.OpenAsync();
+
+                using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                using var reader = await command.ExecuteReaderAsync();
+
+                var results = new List<Dictionary<string, object>>();
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[reader.GetName(i)] = val;
+                    }
+                    results.Add(row);
+                }
+
+                if (!wasOpen) connection.Close();
+
+                return Ok(new { table = tableName, count = results.Count, data = results });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = "Query failed", details = ex.Message });
+            }
+        }
+
+        // FIXED: SAFE DELETE BY EMAIL — WORKS EVEN IF TABLES DON'T EXIST
+        [HttpPost("delete-user-by-email")]
+        public async Task<IActionResult> DeleteUserByEmail([FromBody] DeleteUserRequest request)
+        {
+            if (!AllowAll) return Forbid();
+
+            var email = request.Email.Trim();
+            var user = await _db.Users.FirstOrDefaultAsync(u => EF.Functions.ILike(u.Email, email));
+
+            if (user == null)
+                return NotFound($"User with email '{email}' not found");
+
+            var userId = user.UserId;
+            int deleted = 0;
+
+            // Only delete from tables that actually exist
+            var existingTables = _db.Model.GetEntityTypes()
+                .Select(t => t.GetTableName())
+                .Where(n => n != null)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var sqlCommands = new List<string>();
+
+            if (existingTables.Contains("UserRoles"))
+                sqlCommands.Add($"DELETE FROM \"UserRoles\" WHERE \"UserId\" = {{0}}");
+
+            if (existingTables.Contains("UserSettings"))
+                sqlCommands.Add($"DELETE FROM \"UserSettings\" WHERE \"user_id\" = {{0}}");
+
+            if (existingTables.Contains("UserAssistSettings"))
+                sqlCommands.Add($"DELETE FROM \"UserAssistSettings\" WHERE \"user_id\" = {{0}}");
+
+            // Always delete from Users last
+            sqlCommands.Add($"DELETE FROM \"Users\" WHERE \"UserId\" = {{0}}");
+
+            if (sqlCommands.Any())
+            {
+                var fullSql = string.Join(";\n", sqlCommands);
+                deleted = await _db.Database.ExecuteSqlRawAsync(fullSql, userId);
+            }
+
+            return Ok(new
+            {
+                message = $"All data for '{email}' (ID: {userId}) deleted successfully",
+                deletedRecords = deleted,
+                tablesChecked = existingTables.ToArray(),
+                deletedAt = DateTime.UtcNow
+            });
+        }
+
         [HttpPost("seed/roles")]
-        [Authorize(Roles = "admin")]
         public async Task<IActionResult> SeedRoles()
         {
-            if (!IsAllowed) return Forbid();
+            if (!AllowAll) return Forbid();
 
             var roles = new (string name, string desc)[]
             {
-                ("viewer",  "Standard viewer access"),
-                ("admin",   "Full system administrator"),
-                ("manager", "Site/Floor manager"),
-                ("support", "Customer support"),
-                ("technician", "Field technician")
+                ("admin", "Full access"),
+                ("viewer", "Standard user"),
+                ("manager", "Manager")
             };
 
             int added = 0;
@@ -72,10 +175,9 @@ namespace OcufiiAPI.Controllers
         }
 
         [HttpPost("seed/tenant")]
-        [Authorize(Roles = "admin")]
         public async Task<IActionResult> SeedTenant()
         {
-            if (!IsAllowed) return Forbid();
+            if (!AllowAll) return Forbid();
 
             var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
             if (!await _db.Tenants.AnyAsync(t => t.ResellerId == tenantId))
@@ -91,79 +193,12 @@ namespace OcufiiAPI.Controllers
                 await _db.SaveChangesAsync();
             }
 
-            return Ok(new { message = "Default tenant created" });
-        }
-
-        [HttpPost("seed/create-admin")]
-        [Authorize(Roles = "admin")]
-        public async Task<IActionResult> CreateFirstAdmin([FromBody] CreateAdminRequest request)
-        {
-            if (!IsAllowed) return Forbid();
-
-            // Create user (your exact User table structure)
-            var user = new User
-            {
-                UserId = Guid.NewGuid(),
-                Email = request.Email,
-                FirstName = request.FirstName ?? "Admin",
-                LastName = request.LastName ?? "User",
-                PhoneNumber = request.PhoneNumber,
-                Company = request.Company ?? "Ocufii",
-                // No CreatedAt/UpdatedAt — your table doesn't have them
-            };
-
-            _db.Users.Add(user);
-            await _db.SaveChangesAsync();
-
-            // Create settings
-            _db.UserSettings.Add(new UserSetting { UserId = user.UserId });
-
-            var defaultConfig = "{\"emergency\":{\"alarmSound\":false,\"alertMessage\":\"\",\"flashOn\":false,\"isEnabled\":true,\"screenFlashing\":false},\"distress\":{\"alarmSound\":false,\"alertMessage\":\"\",\"flashOn\":false,\"isEnabled\":true,\"screenFlashing\":false},\"activeShooter\":{\"alarmSound\":false,\"alertMessage\":\"\",\"flashOn\":false,\"isEnabled\":true,\"screenFlashing\":false},\"emergency911\":{\"alertMessage\":\"\",\"isEnabled\":true},\"emergency988\":{\"alertMessage\":\"\",\"isEnabled\":true}}";
-            _db.UserAssistSettings.Add(new UserAssistSetting
-            {
-                UserId = user.UserId,
-                Config = defaultConfig
-            });
-
-            // Assign admin role
-            _db.Set<Dictionary<string, object>>("UserRoles")
-               .Add(new Dictionary<string, object>
-               {
-                   { "UserId", user.UserId },
-                   { "RoleName", "admin" }
-               });
-
-            await _db.SaveChangesAsync();
-
-            return Ok(new
-            {
-                message = "First admin created — NOW YOU CAN LOGIN",
-                email = user.Email,
-                userId = user.UserId,
-                note = "Set password via normal register flow or direct DB update"
-            });
-        }
-
-        [HttpPost("nuke")]
-        [Authorize(Roles = "admin")]
-        public async Task<IActionResult> Nuke()
-        {
-            if (!IsAllowed) return Forbid();
-
-            await _db.Database.ExecuteSqlRawAsync(@"
-                TRUNCATE TABLE ""Users"", ""UserSettings"", ""UserAssistSettings"", ""UserRoles"" RESTART IDENTITY CASCADE;
-            ");
-
-            return Ok(new { message = "Database wiped clean" });
+            return Ok(new { message = "Default tenant ready" });
         }
     }
 
-    public class CreateAdminRequest
+    public class DeleteUserRequest
     {
-        public string Email { get; set; } = "admin@ocufii.sa";
-        public string? FirstName { get; set; }
-        public string? LastName { get; set; }
-        public string? PhoneNumber { get; set; }
-        public string? Company { get; set; }
+        public string Email { get; set; } = "";
     }
 }
