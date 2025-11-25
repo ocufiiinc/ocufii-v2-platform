@@ -21,6 +21,7 @@ namespace OcufiiAPI.Controllers
         private bool AllowAll => _env.IsDevelopment() ||
                                  _env.EnvironmentName.Equals("TestDevWeb", StringComparison.OrdinalIgnoreCase);
 
+        // 1. STATUS
         [HttpGet("status")]
         public IActionResult Status()
         {
@@ -28,32 +29,33 @@ namespace OcufiiAPI.Controllers
             return Ok(new
             {
                 Environment = _env.EnvironmentName,
-                DebugMode = "ACTIVE — NO AUTH — FULL POWER",
+                DebugMode = "FULL POWER — NO AUTH — TESTDEVWEB",
                 Endpoints = new[]
                 {
                     "GET    /api/debug/tables",
                     "GET    /api/debug/table/{name}",
                     "POST   /api/debug/delete-user-by-email",
-                    "POST   /api/debug/seed/roles",
-                    "POST   /api/debug/seed/tenant"
+                    "GET    /api/debug/logs",
+                    "GET    /api/debug/logs/2025-11-23",
+                    "GET    /api/debug/logs/2025-11-23/download"
                 }
             });
         }
 
+        // 2. LIST ALL TABLES
         [HttpGet("tables")]
         public IActionResult GetTables()
         {
             if (!AllowAll) return Forbid();
-
             var tables = _db.Model.GetEntityTypes()
                 .Select(t => t.GetTableName())
                 .Where(n => n != null)
                 .OrderBy(n => n)
                 .ToList();
-
             return Ok(new { count = tables.Count, tables });
         }
 
+        // 3. DUMP ANY TABLE
         [HttpGet("table/{tableName}")]
         public async Task<IActionResult> DumpTable(string tableName)
         {
@@ -63,7 +65,7 @@ namespace OcufiiAPI.Controllers
                 .FirstOrDefault(t => string.Equals(t.GetTableName(), tableName, StringComparison.OrdinalIgnoreCase));
 
             if (entityType == null)
-                return NotFound($"Table '{tableName}' not found in DbContext");
+                return NotFound($"Table '{tableName}' not found");
 
             try
             {
@@ -87,7 +89,6 @@ namespace OcufiiAPI.Controllers
                     }
                     results.Add(row);
                 }
-
                 if (!wasOpen) connection.Close();
 
                 return Ok(new { table = tableName, count = results.Count, data = results });
@@ -98,7 +99,7 @@ namespace OcufiiAPI.Controllers
             }
         }
 
-        // FIXED: SAFE DELETE BY EMAIL — WORKS EVEN IF TABLES DON'T EXIST
+        // 4. DELETE USER BY EMAIL — SAFE
         [HttpPost("delete-user-by-email")]
         public async Task<IActionResult> DeleteUserByEmail([FromBody] DeleteUserRequest request)
         {
@@ -106,60 +107,119 @@ namespace OcufiiAPI.Controllers
 
             var email = request.Email.Trim();
             var user = await _db.Users.FirstOrDefaultAsync(u => EF.Functions.ILike(u.Email, email));
-
-            if (user == null)
-                return NotFound($"User with email '{email}' not found");
+            if (user == null) return NotFound($"User '{email}' not found");
 
             var userId = user.UserId;
-            int deleted = 0;
+            var tables = _db.Model.GetEntityTypes().Select(t => t.GetTableName()).Where(n => n != null).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // Only delete from tables that actually exist
-            var existingTables = _db.Model.GetEntityTypes()
-                .Select(t => t.GetTableName())
-                .Where(n => n != null)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var sql = new List<string>();
+            if (tables.Contains("UserRoles")) sql.Add($"DELETE FROM \"UserRoles\" WHERE \"UserId\" = {{0}}");
+            if (tables.Contains("UserSettings")) sql.Add($"DELETE FROM \"UserSettings\" WHERE \"user_id\" = {{0}}");
+            if (tables.Contains("UserAssistSettings")) sql.Add($"DELETE FROM \"UserAssistSettings\" WHERE \"user_id\" = {{0}}");
+            sql.Add($"DELETE FROM \"Users\" WHERE \"UserId\" = {{0}}");
 
-            var sqlCommands = new List<string>();
+            if (sql.Any())
+                await _db.Database.ExecuteSqlRawAsync(string.Join(";\n", sql), userId);
 
-            if (existingTables.Contains("UserRoles"))
-                sqlCommands.Add($"DELETE FROM \"UserRoles\" WHERE \"UserId\" = {{0}}");
+            return Ok(new { message = $"User '{email}' and all data deleted", userId });
+        }
 
-            if (existingTables.Contains("UserSettings"))
-                sqlCommands.Add($"DELETE FROM \"UserSettings\" WHERE \"user_id\" = {{0}}");
+        [HttpGet("logs")]
+        public IActionResult GetLogFiles()
+        {
+            if (!AllowAll) return Forbid();
 
-            if (existingTables.Contains("UserAssistSettings"))
-                sqlCommands.Add($"DELETE FROM \"UserAssistSettings\" WHERE \"user_id\" = {{0}}");
+            var logPath = GetLogsPath();  // ← THIS NOW WORKS EVERYWHERE
 
-            // Always delete from Users last
-            sqlCommands.Add($"DELETE FROM \"Users\" WHERE \"UserId\" = {{0}}");
+            if (!Directory.Exists(logPath))
+                return Ok(new { message = "Logs folder created", path = logPath });
 
-            if (sqlCommands.Any())
-            {
-                var fullSql = string.Join(";\n", sqlCommands);
-                deleted = await _db.Database.ExecuteSqlRawAsync(fullSql, userId);
-            }
+            var files = Directory.GetFiles(logPath, "ocufii-*.txt")
+                .Select(fullPath =>
+                {
+                    var fi = new FileInfo(fullPath);
+                    var dateStr = fi.Name["ocufii-".Length..^4];
+                    var date = $"{dateStr.Substring(0, 4)}-{dateStr.Substring(4, 2)}-{dateStr.Substring(6, 2)}";
+
+                    return new
+                    {
+                        date,
+                        file = fi.Name,
+                        sizeKb = Math.Round(fi.Length / 1024.0, 2),
+                        modified = fi.LastWriteTime
+                    };
+                })
+                .OrderByDescending(x => x.date)
+                .ToList();
 
             return Ok(new
             {
-                message = $"All data for '{email}' (ID: {userId}) deleted successfully",
-                deletedRecords = deleted,
-                tablesChecked = existingTables.ToArray(),
-                deletedAt = DateTime.UtcNow
+                count = files.Count,
+                logsFolder = logPath,
+                logs = files
             });
         }
 
+        [HttpGet("logs/{date}")]
+        public IActionResult ViewLog(string date)
+        {
+            if (!AllowAll) return Forbid();
+
+            var safeDate = Path.GetFileName(date);
+            if (!DateTime.TryParseExact(safeDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
+                return BadRequest("Date format: YYYY-MM-DD");
+
+            var fileName = $"ocufii-{safeDate.Replace("-", "")}.txt";
+            var filePath = Path.Combine(GetLogsPath(), fileName);
+
+            if (!System.IO.File.Exists(filePath))
+                return NotFound($"Log not found: {fileName}");
+
+            return Content(System.IO.File.ReadAllText(filePath), "text/plain");
+        }
+
+        [HttpGet("logs/{date}/download")]
+        public IActionResult DownloadLog(string date)
+        {
+            if (!AllowAll) return Forbid();
+
+            var safeDate = Path.GetFileName(date);
+            if (!DateTime.TryParseExact(safeDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
+                return BadRequest("Date format: YYYY-MM-DD");
+
+            var fileName = $"ocufii-{safeDate.Replace("-", "")}.txt";
+            var filePath = Path.Combine(GetLogsPath(), fileName);
+
+            if (!System.IO.File.Exists(filePath))
+                return NotFound();
+
+            return File(System.IO.File.ReadAllBytes(filePath), "text/plain", fileName);
+        }
+
+        private string GetLogsPath()
+        {
+            // 1. DEVELOPMENT & TESTDEVWEB: Use project root logs folder
+            var projectRootLogs = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "logs"));
+            if (Directory.Exists(projectRootLogs))
+                return projectRootLogs;
+
+            // 2. PUBLISHED / PRODUCTION: Use logs next to .exe
+            var publishedLogs = Path.Combine(AppContext.BaseDirectory, "logs");
+            if (Directory.Exists(publishedLogs))
+                return publishedLogs;
+
+            // 3. IF STILL NOT FOUND → CREATE IT NEXT TO EXE (for first publish)
+            Directory.CreateDirectory(publishedLogs);
+            return publishedLogs;
+        }
+
+
+        // 8. SEED ROLES & TENANT (unchanged)
         [HttpPost("seed/roles")]
         public async Task<IActionResult> SeedRoles()
         {
             if (!AllowAll) return Forbid();
-
-            var roles = new (string name, string desc)[]
-            {
-                ("admin", "Full access"),
-                ("viewer", "Standard user"),
-                ("manager", "Manager")
-            };
-
+            var roles = new (string name, string desc)[] { ("admin", "Full access"), ("viewer", "User"), ("manager", "Manager") };
             int added = 0;
             foreach (var (name, desc) in roles)
             {
@@ -170,7 +230,6 @@ namespace OcufiiAPI.Controllers
                 }
             }
             if (added > 0) await _db.SaveChangesAsync();
-
             return Ok(new { message = $"Seeded {added} roles" });
         }
 
@@ -178,21 +237,12 @@ namespace OcufiiAPI.Controllers
         public async Task<IActionResult> SeedTenant()
         {
             if (!AllowAll) return Forbid();
-
             var tenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
             if (!await _db.Tenants.AnyAsync(t => t.ResellerId == tenantId))
             {
-                _db.Tenants.Add(new Tenant
-                {
-                    ResellerId = tenantId,
-                    DateCreated = DateTime.UtcNow,
-                    DateUpdated = DateTime.UtcNow,
-                    ThemeConfig = "{}",
-                    CustomWorkflows = "[]"
-                });
+                _db.Tenants.Add(new Tenant { ResellerId = tenantId, DateCreated = DateTime.UtcNow, DateUpdated = DateTime.UtcNow, ThemeConfig = "{}", CustomWorkflows = "[]" });
                 await _db.SaveChangesAsync();
             }
-
             return Ok(new { message = "Default tenant ready" });
         }
     }

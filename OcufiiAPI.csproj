@@ -39,5 +39,14 @@
   <ItemGroup>
     <Folder Include="PublishOutput\" />
   </ItemGroup>
+	<Target Name="CreateLogsFolder" BeforeTargets="Build;Publish">
+    <MakeDir Directories="$(ProjectDir)logs" Condition="!Exists('$(ProjectDir)logs')" />
+    <ItemGroup>
+      <None Include="$(ProjectDir)logs\**\*.*">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </None>
+    </ItemGroup>
+  </Target>
 
 </Project>
