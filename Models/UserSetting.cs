@@ -1,12 +1,5 @@
 ﻿namespace OcufiiAPI.Models
-{
-    public enum NotificationSoundType
-    {
-        DEFAULT,
-        FIRE,
-        EMERGENCY
-    }
-
+{   
     public class UserSetting
     {
         public Guid Id { get; set; } = Guid.NewGuid();

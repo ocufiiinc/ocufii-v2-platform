@@ -54,6 +54,7 @@ namespace OcufiiAPI.Models
         public Setting? Setting { get; set; }
 
         // Navigation
+        public ICollection<Device> Devices { get; set; } = new List<Device>();
         public Tenant? Tenant { get; set; }
         public Role Role { get; set; } = null!;
         public ICollection<Beacon> Beacons { get; set; } = new List<Beacon>();

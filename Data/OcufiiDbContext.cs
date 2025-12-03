@@ -45,8 +45,109 @@ namespace OcufiiAPI.Data
 
         public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
 
+        public DbSet<DeviceType> DeviceTypes { get; set; } = null!;
+        public DbSet<Device> Devices { get; set; } = null!;
+        public DbSet<DeviceCredential> DeviceCredentials { get; set; } = null!;
+        public DbSet<DeviceTelemetry> DeviceTelemetry { get; set; } = null!;
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.HasPostgresEnum("TelemetrySource", new[] { "gateway", "beacon", "safety_card" });
+            modelBuilder.HasPostgresEnum("NotificationSoundType", new[] { "DEFAULT", "FIRE", "EMERGENCY" });
+
+            modelBuilder.Entity<DeviceType>(entity =>
+            {
+                entity.ToTable("DeviceTypes");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.Key).IsRequired();
+                entity.Property(e => e.Name).IsRequired();
+                entity.Property(e => e.ConnectsToMqtt).HasDefaultValue(false);
+                entity.Property(e => e.RequiresAuth).HasDefaultValue(false);
+                entity.Property(e => e.IsUserVisible).HasDefaultValue(true);
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+                entity.HasIndex(e => e.Key).IsUnique();
+            });
+
+            modelBuilder.Entity<Device>(entity =>
+            {
+                entity.ToTable("Devices");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.MacAddress).IsRequired();
+                entity.Property(e => e.Attributes).HasColumnType("jsonb").HasDefaultValue("{}");
+                entity.Property(e => e.IsEnabled).HasDefaultValue(true);
+                entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+                entity.HasIndex(e => e.MacAddress).IsUnique();
+                entity.HasIndex(e => e.DeviceTypeId);
+                entity.HasIndex(e => new { e.IsEnabled, e.IsDeleted });
+
+                entity.HasOne(d => d.DeviceType)
+                      .WithMany()
+                      .HasForeignKey(d => d.DeviceTypeId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(d => d.User)
+                      .WithMany(u => u.Devices)
+                      .HasForeignKey(d => d.UserId)
+                      .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<DeviceCredential>(entity =>
+            {
+                entity.ToTable("DeviceCredentials");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.MqttUsername).IsRequired();
+                entity.Property(e => e.PasswordHash).IsRequired();
+                entity.Property(e => e.IsEnabled).HasDefaultValue(true);
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+                entity.HasIndex(e => e.MqttUsername).IsUnique();
+
+                entity.HasOne(d => d.Device)
+                      .WithOne()
+                      .HasForeignKey<DeviceCredential>(d => d.DeviceId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<DeviceTelemetry>(entity =>
+            {
+                entity.ToTable("DeviceTelemetry");
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                      .ValueGeneratedOnAdd()
+                      .UseIdentityByDefaultColumn();  
+
+                entity.Property(e => e.SourceType)
+                      .HasConversion<string>()
+                      .HasColumnName("SourceType");
+
+                entity.Property(e => e.Payload)
+                      .HasColumnType("jsonb")
+                      .HasDefaultValue("{}");
+
+                entity.Property(e => e.ReceivedAt)
+                      .HasDefaultValueSql("now()");
+
+                // Relationships
+                entity.HasOne(d => d.Device)
+                      .WithMany()
+                      .HasForeignKey(d => d.DeviceId)
+                      .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(d => d.ViaDevice)
+                      .WithMany()
+                      .HasForeignKey(d => d.ViaDeviceId)
+                      .OnDelete(DeleteBehavior.SetNull);
+            });
+
             modelBuilder.Entity<RefreshToken>(entity =>
             {
                 entity.HasKey(e => e.Id);
