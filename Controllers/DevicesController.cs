@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
+using OcufiiAPI.Extensions;
 using OcufiiAPI.Models;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -10,7 +11,7 @@ namespace OcufiiAPI.Controllers;
 
 [ApiController]
 [Route("devices")]
-[Authorize] // All endpoints require JWT
+[Authorize]
 public class DevicesController : ControllerBase
 {
     private readonly OcufiiDbContext _db;
@@ -22,31 +23,42 @@ public class DevicesController : ControllerBase
         _logger = logger;
     }
 
-    // 5.1 GET /devices
     [HttpGet]
-    public async Task<ActionResult> ListDevices(
+    public async Task<ActionResult<ApiResponse>> ListDevices(
         [FromQuery] string? type,
         [FromQuery] bool? isEnabled,
         [FromQuery] string? search,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > 100) pageSize = 50;
+
         var query = _db.Devices
             .Include(d => d.DeviceType)
+            .Where(d => !d.IsDeleted)
             .AsNoTracking();
 
+        var currentUserId = User.GetUserId();
+        var isAdmin = User.IsInRole("admin");
+
+        if (!isAdmin)
+        {
+            query = query.Where(d => d.UserId == currentUserId || d.UserId == null);
+        }
+
         if (!string.IsNullOrWhiteSpace(type))
-            query = query.Where(d => d.DeviceType.Key == type.ToLower());
+            query = query.Where(d => d.DeviceType.Key == type.ToLowerInvariant());
 
         if (isEnabled.HasValue)
             query = query.Where(d => d.IsEnabled == isEnabled.Value);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            search = search.ToLower();
+            var s = search.ToLowerInvariant();
             query = query.Where(d =>
-                d.Name != null && d.Name.ToLower().Contains(search) ||
-                d.MacAddress.ToLower().Contains(search));
+                (d.Name != null && d.Name.ToLower().Contains(s)) ||
+                d.MacAddress.ToLower().Contains(s));
         }
 
         var total = await query.CountAsync();
@@ -63,36 +75,51 @@ public class DevicesController : ControllerBase
                 d.Location,
                 d.IsEnabled,
                 d.IsDeleted,
-                d.Attributes,
+                Attributes = d.Attributes,
                 d.CreatedAt,
                 d.UpdatedAt
             })
             .ToListAsync();
 
-        return Ok(new { items, total, page, pageSize });
+        return Ok(new ApiResponse(true, "Devices retrieved successfully")
+        {
+            Data = new { items, total, page, pageSize }
+        });
     }
 
-    // 5.2 POST /devices
     [HttpPost]
-    public async Task<ActionResult> CreateDevice([FromBody] CreateDeviceRequest request)
+    public async Task<ActionResult<ApiResponse>> CreateDevice([FromBody] JsonElement body)
     {
-        var deviceType = await _db.DeviceTypes
-            .FirstOrDefaultAsync(dt => dt.Key == request.Type.ToLower());
+        if (!body.TryGetProperty("type", out var typeProp) || string.IsNullOrWhiteSpace(typeProp.GetString()))
+            return BadRequest(new ApiResponse(false, "Missing or invalid 'type'"));
 
+        var typeKey = typeProp.GetString()!.Trim().ToLowerInvariant();
+        var deviceType = await _db.DeviceTypes.FirstOrDefaultAsync(dt => dt.Key == typeKey);
         if (deviceType == null)
-            return BadRequest("Invalid device type");
+            return BadRequest(new ApiResponse(false, "Invalid device type"));
 
-        if (await _db.Devices.AnyAsync(d => d.MacAddress == request.MacAddress.Trim()))
-            return Conflict("MacAddress already exists");
+        if (!body.TryGetProperty("macAddress", out var macProp) || string.IsNullOrWhiteSpace(macProp.GetString()))
+            return BadRequest(new ApiResponse(false, "Missing or invalid 'macAddress'"));
+
+        var macAddress = macProp.GetString()!.Trim();
+        if (await _db.Devices.AnyAsync(d => d.MacAddress == macAddress))
+            return Conflict(new ApiResponse(false, "MacAddress already exists"));
+
+        var currentUserId = User.GetUserId();
+        var tenantIdClaim = User.FindFirst("tenant_id")?.Value
+                             ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
 
         var device = new Device
         {
+            Id = Guid.NewGuid(),
             DeviceTypeId = deviceType.Id,
-            MacAddress = request.MacAddress.Trim(),
-            Name = request.Name?.Trim(),
-            Location = request.Location?.Trim(),
-            Information = request.Information,
-            Attributes = JsonSerializer.Serialize(request.Attributes ?? new { }),
+            MacAddress = macAddress,
+            Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null,
+            Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : null,
+            Information = body.TryGetProperty("information", out var i) ? i.GetString()?.Trim() : null,
+            Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : "{}",
+            UserId = currentUserId,  
+            TenantId = Guid.Parse(tenantIdClaim),  
             IsEnabled = true,
             IsDeleted = false,
             CreatedAt = DateTime.UtcNow,
@@ -102,108 +129,111 @@ public class DevicesController : ControllerBase
         _db.Devices.Add(device);
         await _db.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetDevice), new { deviceId = device.Id }, new { deviceId = device.Id });
+        return Created($"/devices/{device.Id}", new ApiResponse(true, "Device created successfully")
+        {
+            Data = new { deviceId = device.Id }
+        });
     }
 
-    // 5.3 GET /devices/{deviceId}
     [HttpGet("{deviceId:guid}")]
-    public async Task<ActionResult> GetDevice(Guid deviceId)
+    public async Task<ActionResult<ApiResponse>> GetDevice(Guid deviceId)
     {
         var device = await _db.Devices
             .Include(d => d.DeviceType)
             .AsNoTracking()
             .FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
 
-        if (device == null) return NotFound();
+        if (device == null)
+            return NotFound(new ApiResponse(false, "Device not found"));
 
-        return Ok(new
+        return Ok(new ApiResponse(true, "Device retrieved successfully")
         {
-            device.Id,
-            type = device.DeviceType.Key,
-            device.MacAddress,
-            device.Name,
-            device.Location,
-            device.IsEnabled,
-            device.IsDeleted,
-            device.Attributes,
-            device.CreatedAt,
-            device.UpdatedAt
+            Data = new
+            {
+                device.Id,
+                type = device.DeviceType.Key,
+                device.MacAddress,
+                device.Name,
+                device.Location,
+                device.IsEnabled,
+                device.IsDeleted,
+                Attributes = device.Attributes,
+                device.CreatedAt,
+                device.UpdatedAt
+            }
         });
     }
 
-    // 5.4 PATCH /devices/{deviceId}
     [HttpPatch("{deviceId:guid}")]
-    public async Task<IActionResult> UpdateDevice(Guid deviceId, [FromBody] JsonElement payload)
+    public async Task<ActionResult<ApiResponse>> UpdateDevice(Guid deviceId, [FromBody] JsonElement payload)
     {
-        var device = await _db.Devices.FindAsync(deviceId);
-        if (device == null || device.IsDeleted) return NotFound();
+        var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
+        if (device == null)
+            return NotFound(new ApiResponse(false, "Device not found"));
+
+        if (payload.ValueKind != JsonValueKind.Object)
+            return BadRequest(new ApiResponse(false, "Invalid JSON payload"));
 
         foreach (var prop in payload.EnumerateObject())
         {
-            switch (prop.Name)
+            switch (prop.Name.ToLowerInvariant())
             {
-                case "name":
-                    device.Name = prop.Value.GetString();
+                case "name": device.Name = prop.Value.GetString()?.Trim(); break;
+                case "location": device.Location = prop.Value.GetString()?.Trim(); break;
+                case "isenabled":
+                    if (prop.Value.ValueKind == JsonValueKind.True) device.IsEnabled = true;
+                    else if (prop.Value.ValueKind == JsonValueKind.False) device.IsEnabled = false;
                     break;
-                case "location":
-                    device.Location = prop.Value.GetString();
-                    break;
-                case "isEnabled":
-                    device.IsEnabled = prop.Value.GetBoolean();
-                    break;
-                case "attributes":
-                    device.Attributes = prop.Value.ToString();
-                    break;
+                case "attributes": device.Attributes = prop.Value.ToString(); break;
             }
         }
 
         device.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        return NoContent();
+        return Ok(new ApiResponse(true, "Device updated successfully"));
     }
 
-    // 5.5 DELETE /devices/{deviceId}
     [HttpDelete("{deviceId:guid}")]
-    public async Task<IActionResult> DeleteDevice(Guid deviceId)
+    public async Task<ActionResult<ApiResponse>> DeleteDevice(Guid deviceId)
     {
-        var device = await _db.Devices.FindAsync(deviceId);
-        if (device == null || device.IsDeleted) return NotFound();
+        var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
+        if (device == null)
+            return NotFound(new ApiResponse(false, "Device not found"));
 
         device.IsDeleted = true;
         device.IsEnabled = false;
         device.UpdatedAt = DateTime.UtcNow;
-
         await _db.SaveChangesAsync();
-        return NoContent();
+
+        return Ok(new ApiResponse(true, "Device deleted successfully"));
     }
 
-    // 6.1 POST /devices/{deviceId}/credentials
     [HttpPost("{deviceId:guid}/credentials")]
-    public async Task<ActionResult> IssueCredentials(Guid deviceId, [FromBody] IssueCredentialsRequest request)
+    public async Task<ActionResult<ApiResponse>> IssueCredentials(Guid deviceId, [FromBody] IssueCredentialsRequest? request)
     {
+        request ??= new IssueCredentialsRequest();
+
         var device = await _db.Devices
             .Include(d => d.DeviceType)
             .FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
 
-        if (device == null) return NotFound();
-        if (!device.DeviceType.ConnectsToMqtt) return BadRequest("Device does not support MQTT");
+        if (device == null)
+            return NotFound(new ApiResponse(false, "Device not found"));
+        if (!device.DeviceType.ConnectsToMqtt)
+            return BadRequest(new ApiResponse(false, "This device type does not support MQTT"));
 
-        var cred = await _db.DeviceCredentials
-            .FirstOrDefaultAsync(c => c.DeviceId == deviceId);
+        var existing = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
 
-        if (cred != null && !request.Regenerate)
-            return Conflict("Credentials already exist. Use regenerate=true");
+        if (existing != null && !request.Regenerate)
+            return Conflict(new ApiResponse(false, "Credentials already exist. Use regenerate=true"));
 
-        if (cred != null)
-        {
-            _db.DeviceCredentials.Remove(cred);
-        }
+        if (existing != null) _db.DeviceCredentials.Remove(existing);
 
-        var username = $"{device.DeviceType.Key}_{device.MacAddress.Replace(":", "")}".ToLower();
+        var username = $"{device.DeviceType.Key}_{device.MacAddress.Replace(":", "").ToLowerInvariant()}";
         var password = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
-        var newCred = new DeviceCredential
+        var cred = new DeviceCredential
         {
             DeviceId = device.Id,
             MqttUsername = username,
@@ -214,63 +244,54 @@ public class DevicesController : ControllerBase
             UpdatedAt = DateTime.UtcNow
         };
 
-        _db.DeviceCredentials.Add(newCred);
+        _db.DeviceCredentials.Add(cred);
         await _db.SaveChangesAsync();
 
-        return Created("", new
+        return Created("", new ApiResponse(true, "Credentials issued successfully")
         {
-            mqttUsername = username,
-            mqttPassword = password // Returned only once!
+            Data = new { mqttUsername = username, mqttPassword = password }
         });
     }
 
-    // 6.2 GET /devices/{deviceId}/credentials
     [HttpGet("{deviceId:guid}/credentials")]
-    [Authorize(Roles = "Admin")]
-    public async Task<ActionResult> GetCredentialsMetadata(Guid deviceId)
+    //[Authorize(Roles = "admin")]
+    public async Task<ActionResult<ApiResponse>> GetCredentialsMetadata(Guid deviceId)
     {
-        var cred = await _db.DeviceCredentials
-            .FirstOrDefaultAsync(c => c.DeviceId == deviceId);
+        var cred = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
+        if (cred == null)
+            return NotFound(new ApiResponse(false, "Credentials not found"));
 
-        if (cred == null) return NotFound();
-
-        return Ok(new
+        return Ok(new ApiResponse(true, "Credentials retrieved")
         {
-            cred.MqttUsername,
-            cred.IsEnabled,
-            cred.LastRotatedAt
+            Data = new
+            {
+                cred.MqttUsername,
+                cred.IsEnabled,
+                cred.LastRotatedAt
+            }
         });
     }
 
-    // 6.3 DELETE /devices/{deviceId}/credentials
     [HttpDelete("{deviceId:guid}/credentials")]
-    public async Task<IActionResult> RevokeCredentials(Guid deviceId)
+    public async Task<ActionResult<ApiResponse>> RevokeCredentials(Guid deviceId)
     {
-        var cred = await _db.DeviceCredentials
-            .FirstOrDefaultAsync(c => c.DeviceId == deviceId);
-
-        if (cred == null) return NotFound();
+        var cred = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
+        if (cred == null)
+            return NotFound(new ApiResponse(false, "Credentials not found"));
 
         _db.DeviceCredentials.Remove(cred);
         await _db.SaveChangesAsync();
 
-        return NoContent();
+        return Ok(new ApiResponse(true, "Credentials revoked successfully"));
     }
 
-    // 7.1 GET /devices/{deviceId}/telemetry
     [HttpGet("{deviceId:guid}/telemetry")]
-    public async Task<ActionResult> GetTelemetry(
-        Guid deviceId,
-        [FromQuery] int limit = 100,
-        [FromQuery] DateTime? since = null)
+    public async Task<ActionResult<ApiResponse>> GetTelemetry(Guid deviceId, [FromQuery] int limit = 100, [FromQuery] DateTime? since = null)
     {
         if (limit < 1 || limit > 1000) limit = 100;
 
-        var query = _db.DeviceTelemetry
-            .Where(t => t.DeviceId == deviceId);
-
-        if (since.HasValue)
-            query = query.Where(t => t.ReceivedAt >= since.Value);
+        var query = _db.DeviceTelemetry.Where(t => t.DeviceId == deviceId);
+        if (since.HasValue) query = query.Where(t => t.ReceivedAt >= since.Value);
 
         var items = await query
             .OrderByDescending(t => t.ReceivedAt)
@@ -278,7 +299,7 @@ public class DevicesController : ControllerBase
             .Select(t => new
             {
                 t.Id,
-                sourceType = t.SourceType.ToString().ToLower(),
+                sourceType = t.SourceType.ToString().ToLowerInvariant(),
                 t.ViaDeviceId,
                 t.BatteryLevel,
                 t.SignalStrength,
@@ -289,19 +310,11 @@ public class DevicesController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(new { items });
+        return Ok(new ApiResponse(true, "Telemetry retrieved successfully")
+        {
+            Data = new { items }
+        });
     }
-}
-
-// DTOs
-public class CreateDeviceRequest
-{
-    public string Type { get; set; } = string.Empty;
-    public string MacAddress { get; set; } = string.Empty;
-    public string? Name { get; set; }
-    public string? Location { get; set; }
-    public string? Information { get; set; }
-    public object? Attributes { get; set; }
 }
 
 public class IssueCredentialsRequest
