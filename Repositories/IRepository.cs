@@ -10,6 +10,7 @@ namespace OcufiiAPI.Repositories
         Task AddAsync(T entity);
         void Update(T entity);
         void Delete(T entity);
+        IQueryable<T> Query();
         Task SaveAsync();
     }
 }

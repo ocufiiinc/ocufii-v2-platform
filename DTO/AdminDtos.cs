@@ -1,0 +1,50 @@
+﻿using OcufiiAPI.Models;
+
+namespace OcufiiAPI.DTO
+{
+    public class CreateTenantRequest
+    {
+        public string? ThemeConfig { get; set; }
+        public string? CustomWorkflows { get; set; }
+    }
+
+    //public class CreateDependentRequest : CreateUserRequest
+    //{
+    //    public List<AssignFeatureRequest>? Features { get; set; }
+    //}
+
+    public class CreateUserRequest
+    {
+        public string Email { get; set; } = string.Empty;
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
+        public string? Company { get; set; }
+        public string Role { get; set; } = "user"; 
+        public Guid? TenantId { get; set; } 
+    }
+
+    public class CreateDependentRequest : CreateUserRequest
+    {
+        public string Email { get; set; } = string.Empty;
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
+        public string? Company { get; set; }
+        public string? Role { get; set; } = "user";  // Default
+        public List<AssignFeatureRequest>? Features { get; set; }  // New — assign during creation
+    }
+
+    public class AssignFeatureRequest
+    {
+        public Guid FeatureId { get; set; }
+        public bool IsEnabled { get; set; } = true;
+        public FeatureRight Right { get; set; } = FeatureRight.OnlyView;
+    }
+
+    public class UpdateFeatureRequest
+    {
+        public bool IsEnabled { get; set; }
+        public FeatureRight Right { get; set; }
+    }
+}

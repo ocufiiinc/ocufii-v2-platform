@@ -42,16 +42,73 @@ namespace OcufiiAPI.Data
         public DbSet<WeeklySystemActivityReport> WeeklySystemActivityReports => Set<WeeklySystemActivityReport>();
         public DbSet<UserSetting> UserSettings { get; set; } = null!;
         public DbSet<UserAssistSetting> UserAssistSettings { get; set; } = null!;
-
         public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
-
         public DbSet<DeviceType> DeviceTypes { get; set; } = null!;
         public DbSet<Device> Devices { get; set; } = null!;
         public DbSet<DeviceCredential> DeviceCredentials { get; set; } = null!;
         public DbSet<DeviceTelemetry> DeviceTelemetry { get; set; } = null!;
+        public DbSet<Feature> Features { get; set; } = null!;
+        public DbSet<UserFeature> UserFeatures { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+
+            // NEW: Features
+            modelBuilder.Entity<Feature>(entity =>
+            {
+                entity.ToTable("Features");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.Key).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+                entity.Property(e => e.Description).HasMaxLength(500);
+                entity.Property(e => e.DeviceTypeId).HasColumnType("uuid");
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+                entity.HasIndex(e => e.Key).IsUnique();
+
+                entity.HasOne(f => f.DeviceType)
+                      .WithMany()
+                      .HasForeignKey(f => f.DeviceTypeId)
+                      .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<UserFeature>(entity =>
+            {
+                entity.ToTable("UserFeatures");
+                entity.HasKey(e => new { e.UserId, e.FeatureId });
+                entity.Property(e => e.IsEnabled).HasDefaultValue(false);
+                entity.Property(e => e.Right).HasConversion<string>();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+                entity.HasOne(uf => uf.User)
+                      .WithMany(u => u.UserFeatures)
+                      .HasForeignKey(uf => uf.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(uf => uf.Feature)
+                      .WithMany()
+                      .HasForeignKey(uf => uf.FeatureId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.Property(e => e.ParentId).HasColumnType("uuid");
+
+                entity.HasOne(u => u.Parent)
+                      .WithMany(u => u.Dependents)
+                      .HasForeignKey(u => u.ParentId)
+                      .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<Role>().HasData(
+               new Role { RoleId = 10, RoleName = "super_admin", RoleDescription = "Ocufii Global Super Admin" },
+               new Role { RoleId = 11, RoleName = "tenant_admin", RoleDescription = "Tenant Administrator"}
+            );
+
             modelBuilder.HasPostgresEnum("TelemetrySource", new[] { "gateway", "beacon", "safety_card" });
             modelBuilder.HasPostgresEnum("NotificationSoundType", new[] { "DEFAULT", "FIRE", "EMERGENCY" });
 
@@ -440,9 +497,6 @@ namespace OcufiiAPI.Data
                 .Property(t => t.DateCreated).HasDefaultValueSql("CURRENT_TIMESTAMP");
             modelBuilder.Entity<Tenant>()
                 .Property(t => t.DateUpdated).HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-            modelBuilder.Entity<Role>()
-                .Property(r => r.RoleId).UseIdentityAlwaysColumn(); 
         }
     }
 }

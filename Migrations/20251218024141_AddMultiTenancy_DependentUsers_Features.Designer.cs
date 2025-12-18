@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OcufiiAPI.Data;
@@ -11,9 +12,11 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    partial class OcufiiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251218024141_AddMultiTenancy_DependentUsers_Features")]
+    partial class AddMultiTenancy_DependentUsers_Features
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

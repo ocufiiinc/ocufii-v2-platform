@@ -15,6 +15,7 @@ using System.Security.Claims;
 using System.Text;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 
 namespace OcufiiAPI.Controllers;
 
@@ -46,8 +47,10 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
-        var user = (await _userRepo.FindAsync(u => u.Email == dto.Email && !u.IsDeleted))
-                        .FirstOrDefault();
+        var user = await _userRepo.Query()  // ← THIS RETURNS IQueryable
+            .Where(u => u.Email == dto.Email && !u.IsDeleted)
+            .Include(u => u.Role)           // ← NOW WORKS
+            .FirstOrDefaultAsync();
 
         if (user == null || _hasher.VerifyHashedPassword(user, user.Password, dto.Password)
             == PasswordVerificationResult.Failed)

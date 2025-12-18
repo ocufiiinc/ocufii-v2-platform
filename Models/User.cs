@@ -57,6 +57,10 @@ namespace OcufiiAPI.Models
         public ICollection<Device> Devices { get; set; } = new List<Device>();
         public Tenant? Tenant { get; set; }
         public Role Role { get; set; } = null!;
+        public Guid? ParentId { get; set; }
+        public User? Parent { get; set; }
+        public ICollection<User> Dependents { get; set; } = new List<User>();
+        public ICollection<UserFeature> UserFeatures { get; set; } = new List<UserFeature>();
         public ICollection<Beacon> Beacons { get; set; } = new List<Beacon>();
         public ICollection<Gateway> Gateways { get; set; } = new List<Gateway>();
         public ICollection<Notification> Notifications { get; set; } = new List<Notification>();

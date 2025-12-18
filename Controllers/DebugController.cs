@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
 using OcufiiAPI.Models;
@@ -336,7 +337,7 @@ namespace OcufiiAPI.Controllers
             if (!Directory.Exists(logPath))
                 return Ok(new { message = "Logs folder created", path = logPath });
 
-            var files = Directory.GetFiles(logPath, "ocufii-*.txt")
+            var files = Directory.GetFiles(logPath, "ocufii-*.log")
                 .Select(fullPath =>
                 {
                     var fi = new FileInfo(fullPath);
@@ -371,7 +372,7 @@ namespace OcufiiAPI.Controllers
             if (!DateTime.TryParseExact(safeDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
                 return BadRequest("Date format: YYYY-MM-DD");
 
-            var fileName = $"ocufii-{safeDate.Replace("-", "")}.txt";
+            var fileName = $"ocufii-{safeDate.Replace("-", "")}.log";
             var filePath = Path.Combine(GetLogsPath(), fileName);
 
             if (!System.IO.File.Exists(filePath))
@@ -389,7 +390,7 @@ namespace OcufiiAPI.Controllers
             if (!DateTime.TryParseExact(safeDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
                 return BadRequest("Date format: YYYY-MM-DD");
 
-            var fileName = $"ocufii-{safeDate.Replace("-", "")}.txt";
+            var fileName = $"ocufii-{safeDate.Replace("-", "")}.log";
             var filePath = Path.Combine(GetLogsPath(), fileName);
 
             if (!System.IO.File.Exists(filePath))
@@ -448,6 +449,145 @@ namespace OcufiiAPI.Controllers
             }
             return Ok(new { message = "Default tenant ready" });
         }
+
+        private readonly PasswordHasher<User> _hasher = new(); // ← Add this field in DebugController
+
+        [HttpPost("seed/super-admin")]
+        public async Task<IActionResult> SeedSuperAdmin()
+        {
+            if (!AllowAll) return Forbid();
+
+            const string adminEmail = "admin@ocufii.com";
+            const string adminPassword = "Admin@2025!";
+
+            var existing = await _db.Users.FirstOrDefaultAsync(u => u.Email == adminEmail);
+            if (existing != null)
+            {
+                return Ok(new
+                {
+                    message = "Super Admin already exists",
+                    email = adminEmail,
+                    password = "Use change-password endpoint"
+                });
+            }
+
+            var superAdminRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == "super_admin");
+            if (superAdminRole == null)
+            {
+                superAdminRole = new Role { RoleName = "super_admin", RoleDescription = "Ocufii Global Super Admin"};
+                _db.Roles.Add(superAdminRole);
+                await _db.SaveChangesAsync();
+            }
+
+            var admin = new User
+            {
+                UserId = Guid.NewGuid(),
+                Email = adminEmail,
+                FirstName = "Ocufii",
+                LastName = "Super Admin",
+                PhoneNumber = "+966500000000",
+                Company = "Ocufii Global",
+                Username = "superadmin",
+                Password = _hasher.HashPassword(null!, adminPassword), // ← CORRECT HASH
+                RoleId = superAdminRole.RoleId,
+                TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+                IsEnabled = true,
+                IsDeleted = false,
+                DateSubmitted = DateTime.UtcNow,
+                DateUpdated = DateTime.UtcNow
+            };
+
+            _db.Users.Add(admin);
+            await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Super Admin created — LOGIN NOW",
+                email = adminEmail,
+                password = adminPassword,
+                note = "CHANGE PASSWORD AFTER FIRST LOGIN"
+            });
+        }
+
+        // POST /api/debug/seed/features
+        [HttpPost("seed/features")]
+        public async Task<IActionResult> SeedFeatures()
+        {
+            if (!AllowAll) return Forbid();
+
+            var features = new[]
+            {
+        new { Key = "gateway_management", Name = "Gateway Management", Description = "Full control over gateways" },
+        new { Key = "beacon_view", Name = "Beacon View", Description = "View beacon data" },
+        new { Key = "beacon_edit", Name = "Beacon Edit", Description = "Edit beacon settings" },
+        new { Key = "safety_card_control", Name = "Safety Card Control", Description = "Manage safety cards" },
+        new { Key = "telemetry_access", Name = "Real-Time Telemetry", Description = "View live telemetry" },
+        new { Key = "user_management", Name = "User Management", Description = "Create and manage dependent users" },
+        new { Key = "reports_access", Name = "Reports & Analytics", Description = "Access to reports" }
+    };
+
+            int added = 0;
+            foreach (var f in features)
+            {
+                if (!await _db.Features.AnyAsync(x => x.Key == f.Key))
+                {
+                    _db.Features.Add(new Feature
+                    {
+                        Id = Guid.NewGuid(),
+                        Key = f.Key,
+                        Name = f.Name,
+                        Description = f.Description,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                    added++;
+                }
+            }
+
+            if (added > 0) await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Seeded {added} features (total {features.Length})" });
+        }
+
+        // POST /api/debug/seed/feature-flags
+        [HttpPost("seed/feature-flags")]
+        public async Task<IActionResult> SeedFeatureFlags()
+        {
+            if (!AllowAll) return Forbid();
+
+            var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+            var flags = new[]
+            {
+        new { FlagName = "enable_panic_button", IsEnabled = true, Config = "{\"timeout\":30,\"escalation\":true}" },
+        new { FlagName = "enable_geofencing", IsEnabled = true, Config = "{\"radius\":100}" },
+        new { FlagName = "enable_live_tracking", IsEnabled = true, Config = "{}" },
+        new { FlagName = "enable_reports", IsEnabled = true, Config = "{\"daily\":true,\"weekly\":true}" },
+        new { FlagName = "enable_multi_language", IsEnabled = false, Config = "{\"languages\":[\"en\",\"ar\"]}" }
+    };
+
+            int added = 0;
+            foreach (var f in flags)
+            {
+                if (!await _db.FeatureFlags.AnyAsync(ff => ff.FlagName == f.FlagName && ff.TenantId == defaultTenantId))
+                {
+                    _db.FeatureFlags.Add(new FeatureFlag
+                    {
+                        TenantId = defaultTenantId,
+                        FlagName = f.FlagName,
+                        IsEnabled = f.IsEnabled,
+                        Config = f.Config,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                    added++;
+                }
+            }
+
+            if (added > 0) await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Seeded {added} feature flags for default tenant" });
+        }
+
     }
 
     public class DeleteUserRequest
