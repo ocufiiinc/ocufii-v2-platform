@@ -400,8 +400,11 @@ namespace OcufiiAPI.Controllers
 
         private string GetLogsPath()
         {
+            var projectRoot = Directory.GetCurrentDirectory();           // ← THIS IS PROJECT ROOT
+            var projectRootLogs = Path.Combine(projectRoot, "logs");
+
             // 1. DEVELOPMENT & TESTDEVWEB: Use project root logs folder
-            var projectRootLogs = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "logs"));
+            //var projectRootLogs = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "logs"));
             if (Directory.Exists(projectRootLogs))
                 return projectRootLogs;
 

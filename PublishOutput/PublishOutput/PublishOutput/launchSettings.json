@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "OcufiiAPI": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "TestDevWeb"
+      }
+    }
+  }
+}

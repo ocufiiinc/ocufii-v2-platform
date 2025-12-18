@@ -17,16 +17,21 @@ using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ==================== SERILOG – CLEAN STRUCTURED LOGS ====================
+var projectRoot = Directory.GetCurrentDirectory();           // ← THIS IS PROJECT ROOT
+var logPath = Path.Combine(projectRoot, "logs");
+
+Directory.CreateDirectory(logPath);  // ← Creates logs folder in project root
+
 Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Debug()
-    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Information()
     .Enrich.FromLogContext()
     .WriteTo.Console()
     .WriteTo.File(
-        path: "logs/ocufii-.txt",
+        path: Path.Combine(logPath, "ocufii-.log"),
         rollingInterval: RollingInterval.Day,
-        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+        retainedFileCountLimit: 31,
+        fileSizeLimitBytes: 50_000_000,
+        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff} {Level:u3}] {Message:lj}{NewLine}{Exception}"
     )
     .CreateLogger();
 
@@ -197,5 +202,5 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<OcufiiDbContext>();
     db.Database.Migrate();
 }
-
+app.Lifetime.ApplicationStopped.Register(Log.CloseAndFlush);
 app.Run();
