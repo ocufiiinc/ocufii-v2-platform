@@ -7,6 +7,7 @@ using System.Text.Json;
 using OcufiiAPI.Extensions;
 using Microsoft.Extensions.Options;
 using OcufiiAPI.Configs;
+using Microsoft.EntityFrameworkCore;
 
 [ApiController]
 [Route("api/settings/me")]
@@ -32,18 +33,21 @@ public class SettingsController : ControllerBase
 
     private async Task<UserSetting> GetOrCreateUserSetting(Guid userId)
     {
-        var setting = (await _userSettingRepo.FindAsync(s => s.UserId == userId)).FirstOrDefault()
-                      ?? new UserSetting { UserId = userId };
+        var setting = await _userSettingRepo.Query()
+            .FirstOrDefaultAsync(s => s.UserId == userId);
 
-        if (setting.Id == Guid.Empty)
+        if (setting == null)
         {
-            setting.MovementSound = _defaults.MovementSound;
-            setting.MovementVibration = _defaults.MovementVibration;
-            setting.NotificationSound = Enum.Parse<NotificationSoundType>(_defaults.NotificationSound);
-            setting.AutoLogoutEnabled = _defaults.AutoLogoutEnabled;
-            setting.AutoLogoutInterval = _defaults.AutoLogoutInterval;
-            setting.BypassFocus = _defaults.BypassFocus;
-
+            setting = new UserSetting
+            {
+                UserId = userId,
+                MovementSound = _defaults.MovementSound,
+                MovementVibration = _defaults.MovementVibration,
+                NotificationSound = Enum.Parse<NotificationSoundType>(_defaults.NotificationSound),
+                AutoLogoutEnabled = _defaults.AutoLogoutEnabled,
+                AutoLogoutInterval = _defaults.AutoLogoutInterval,
+                BypassFocus = _defaults.BypassFocus
+            };
             await _userSettingRepo.AddAsync(setting);
             await _userSettingRepo.SaveAsync();
         }
