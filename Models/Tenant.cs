@@ -23,6 +23,5 @@ namespace OcufiiAPI.Models
         // Navigation
         public ICollection<User> Users { get; set; } = new List<User>();
         public ICollection<FeatureFlag> FeatureFlags { get; set; } = new List<FeatureFlag>();
-        public ICollection<Billing> Billings { get; set; } = new List<Billing>();
     }
 }

@@ -51,8 +51,6 @@ namespace OcufiiAPI.Models
         [StringLength(20)]
         public string AccountType { get; set; } = "single"; // single | multi
 
-        public Setting? Setting { get; set; }
-
         // Navigation
         public ICollection<Device> Devices { get; set; } = new List<Device>();
         public Tenant? Tenant { get; set; }
@@ -61,22 +59,6 @@ namespace OcufiiAPI.Models
         public User? Parent { get; set; }
         public ICollection<User> Dependents { get; set; } = new List<User>();
         public ICollection<UserFeature> UserFeatures { get; set; } = new List<UserFeature>();
-        public ICollection<Beacon> Beacons { get; set; } = new List<Beacon>();
-        public ICollection<Gateway> Gateways { get; set; } = new List<Gateway>();
-        public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
-        public ICollection<BeaconData> BeaconData { get; set; } = new List<BeaconData>();
-        public ICollection<GatewayData> GatewayData { get; set; } = new List<GatewayData>();
-        public ICollection<CustomerSupportTicket> SupportTickets { get; set; } = new List<CustomerSupportTicket>();
-        public ICollection<DeviceToken> DeviceTokens { get; set; } = new List<DeviceToken>();
-        public ICollection<EmailVerification> EmailVerifications { get; set; } = new List<EmailVerification>();
-        public ICollection<Invite> SentInvites { get; set; } = new List<Invite>();
-        public ICollection<UserSubscription> Subscriptions { get; set; } = new List<UserSubscription>();
-        public ICollection<UserPurchase> Purchases { get; set; } = new List<UserPurchase>();
-        public ICollection<Setting> Settings { get; set; } = new List<Setting>();
-        public ICollection<SnoozeSetting> SnoozeSettings { get; set; } = new List<SnoozeSetting>();
-        public ICollection<Thing> Things { get; set; } = new List<Thing>();
-        public ICollection<UserGateway> UserGateways { get; set; } = new List<UserGateway>();
-        public ICollection<UserNotify> UserNotifies { get; set; } = new List<UserNotify>();
-        public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+        public ICollection<DeviceToken> DeviceTokens { get; set; } = new List<DeviceToken>();       
     }
 }

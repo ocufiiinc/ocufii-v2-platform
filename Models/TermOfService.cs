@@ -20,6 +20,5 @@ namespace OcufiiAPI.Models
         public Guid? CreatedBy { get; set; }
 
         public User? CreatedByUser { get; set; }
-        public ICollection<Setting> Settings { get; set; } = new List<Setting>();
     }
 }

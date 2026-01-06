@@ -18,7 +18,5 @@ namespace OcufiiAPI.Models
 
         // Navigation
         public ICollection<User> Users { get; set; } = new List<User>();
-        public ICollection<Permission> Permissions { get; set; } = new List<Permission>();
-        public ICollection<Invite> Invites { get; set; } = new List<Invite>();
     }
 }

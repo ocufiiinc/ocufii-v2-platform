@@ -1,0 +1,31 @@
+{
+  "emergency": {
+    "alarmSound": false,
+    "alertMessage": "",
+    "flashOn": false,
+    "isEnabled": true,
+    "screenFlashing": false
+  },
+  "distress": {
+    "alarmSound": false,
+    "alertMessage": "",
+    "flashOn": false,
+    "isEnabled": true,
+    "screenFlashing": false
+  },
+  "activeShooter": {
+    "alarmSound": false,
+    "alertMessage": "",
+    "flashOn": false,
+    "isEnabled": true,
+    "screenFlashing": false
+  },
+  "emergency911": {
+    "alertMessage": "",
+    "isEnabled": true
+  },
+  "emergency988": {
+    "alertMessage": "",
+    "isEnabled": true
+  }
+}

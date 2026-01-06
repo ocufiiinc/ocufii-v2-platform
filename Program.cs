@@ -14,6 +14,7 @@ using OcufiiAPI.Data;
 using Microsoft.OpenApi.Models;
 using OcufiiAPI.Handler;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -81,7 +82,8 @@ builder.Services.AddSwaggerGen(c =>
 
 // Database
 builder.Services.AddDbContext<OcufiiDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("OcufiiConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("OcufiiConnection"))
+           .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning)));
 
 // Repositories
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));

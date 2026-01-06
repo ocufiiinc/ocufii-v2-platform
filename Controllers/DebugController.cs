@@ -372,13 +372,25 @@ namespace OcufiiAPI.Controllers
             if (!DateTime.TryParseExact(safeDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
                 return BadRequest("Date format: YYYY-MM-DD");
 
-            var fileName = $"ocufii-{safeDate.Replace("-", "")}.log";
-            var filePath = Path.Combine(GetLogsPath(), fileName);
+            var logPath = GetLogsPath();
+            var possibleFiles = Directory.GetFiles(logPath, $"ocufii-{safeDate.Replace("-", "")}.*")
+                .FirstOrDefault(f => f.EndsWith(".log") || f.EndsWith(".txt"));
 
-            if (!System.IO.File.Exists(filePath))
-                return NotFound($"Log not found: {fileName}");
+            if (possibleFiles == null || !System.IO.File.Exists(possibleFiles))
+                return NotFound($"Log not found for date: {safeDate}");
 
-            return Content(System.IO.File.ReadAllText(filePath), "text/plain");
+            try
+            {
+                // SAFE READ — allows shared access (Serilog is writing)
+                using var stream = new FileStream(possibleFiles, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream);
+                var content = reader.ReadToEnd();
+                return Content(content, "text/plain");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse(false, $"Failed to read log: {ex.Message}"));
+            }
         }
 
         [HttpGet("logs/{date}/download")]
@@ -390,13 +402,25 @@ namespace OcufiiAPI.Controllers
             if (!DateTime.TryParseExact(safeDate, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _))
                 return BadRequest("Date format: YYYY-MM-DD");
 
-            var fileName = $"ocufii-{safeDate.Replace("-", "")}.log";
-            var filePath = Path.Combine(GetLogsPath(), fileName);
+            var logPath = GetLogsPath();
+            var possibleFiles = Directory.GetFiles(logPath, $"ocufii-{safeDate.Replace("-", "")}.*")
+                .FirstOrDefault(f => f.EndsWith(".log") || f.EndsWith(".txt"));
 
-            if (!System.IO.File.Exists(filePath))
+            if (possibleFiles == null || !System.IO.File.Exists(possibleFiles))
                 return NotFound();
 
-            return File(System.IO.File.ReadAllBytes(filePath), "text/plain", fileName);
+            var fileName = Path.GetFileName(possibleFiles);
+
+            try
+            {
+                // SAFE READ — shared access
+                var stream = new FileStream(possibleFiles, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                return File(stream, "text/plain", fileName);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new ApiResponse(false, $"Failed to download log: {ex.Message}"));
+            }
         }
 
         private string GetLogsPath()
@@ -549,44 +573,44 @@ namespace OcufiiAPI.Controllers
             return Ok(new { message = $"Seeded {added} features (total {features.Length})" });
         }
 
-        // POST /api/debug/seed/feature-flags
-        [HttpPost("seed/feature-flags")]
-        public async Task<IActionResult> SeedFeatureFlags()
-        {
-            if (!AllowAll) return Forbid();
+    //    // POST /api/debug/seed/feature-flags
+    //    [HttpPost("seed/feature-flags")]
+    //    public async Task<IActionResult> SeedFeatureFlags()
+    //    {
+    //        if (!AllowAll) return Forbid();
 
-            var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    //        var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
-            var flags = new[]
-            {
-        new { FlagName = "enable_panic_button", IsEnabled = true, Config = "{\"timeout\":30,\"escalation\":true}" },
-        new { FlagName = "enable_geofencing", IsEnabled = true, Config = "{\"radius\":100}" },
-        new { FlagName = "enable_live_tracking", IsEnabled = true, Config = "{}" },
-        new { FlagName = "enable_reports", IsEnabled = true, Config = "{\"daily\":true,\"weekly\":true}" },
-        new { FlagName = "enable_multi_language", IsEnabled = false, Config = "{\"languages\":[\"en\",\"ar\"]}" }
-    };
+    //        var flags = new[]
+    //        {
+    //    new { FlagName = "enable_panic_button", IsEnabled = true, Config = "{\"timeout\":30,\"escalation\":true}" },
+    //    new { FlagName = "enable_geofencing", IsEnabled = true, Config = "{\"radius\":100}" },
+    //    new { FlagName = "enable_live_tracking", IsEnabled = true, Config = "{}" },
+    //    new { FlagName = "enable_reports", IsEnabled = true, Config = "{\"daily\":true,\"weekly\":true}" },
+    //    new { FlagName = "enable_multi_language", IsEnabled = false, Config = "{\"languages\":[\"en\",\"ar\"]}" }
+    //};
 
-            int added = 0;
-            foreach (var f in flags)
-            {
-                if (!await _db.FeatureFlags.AnyAsync(ff => ff.FlagName == f.FlagName && ff.TenantId == defaultTenantId))
-                {
-                    _db.FeatureFlags.Add(new FeatureFlag
-                    {
-                        TenantId = defaultTenantId,
-                        FlagName = f.FlagName,
-                        IsEnabled = f.IsEnabled,
-                        Config = f.Config,
-                        UpdatedAt = DateTime.UtcNow
-                    });
-                    added++;
-                }
-            }
+    //        int added = 0;
+    //        foreach (var f in flags)
+    //        {
+    //            if (!await _db.FeatureFlags.AnyAsync(ff => ff.FlagName == f.FlagName && ff.TenantId == defaultTenantId))
+    //            {
+    //                _db.FeatureFlags.Add(new FeatureFlag
+    //                {
+    //                    TenantId = defaultTenantId,
+    //                    FlagName = f.FlagName,
+    //                    IsEnabled = f.IsEnabled,
+    //                    Config = f.Config,
+    //                    UpdatedAt = DateTime.UtcNow
+    //                });
+    //                added++;
+    //            }
+    //        }
 
-            if (added > 0) await _db.SaveChangesAsync();
+    //        if (added > 0) await _db.SaveChangesAsync();
 
-            return Ok(new { message = $"Seeded {added} feature flags for default tenant" });
-        }
+    //        return Ok(new { message = $"Seeded {added} feature flags for default tenant" });
+    //    }
 
     }
 
