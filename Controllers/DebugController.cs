@@ -1,8 +1,11 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using OcufiiAPI.Configs;
 using OcufiiAPI.Data;
 using OcufiiAPI.Models;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace OcufiiAPI.Controllers
@@ -13,11 +16,13 @@ namespace OcufiiAPI.Controllers
     {
         private readonly OcufiiDbContext _db;
         private readonly IWebHostEnvironment _env;
+        private readonly IOptions<SnoozeReasonConfig> _snoozeConfig;
 
-        public DebugController(OcufiiDbContext db, IWebHostEnvironment env)
+        public DebugController(OcufiiDbContext db, IWebHostEnvironment env, IOptions<SnoozeReasonConfig> snoozeConfig)
         {
             _db = db;
             _env = env;
+            _snoozeConfig = snoozeConfig;
         }
 
         private bool AllowAll => _env.IsDevelopment() ||
@@ -573,44 +578,235 @@ namespace OcufiiAPI.Controllers
             return Ok(new { message = $"Seeded {added} features (total {features.Length})" });
         }
 
-    //    // POST /api/debug/seed/feature-flags
-    //    [HttpPost("seed/feature-flags")]
-    //    public async Task<IActionResult> SeedFeatureFlags()
-    //    {
-    //        if (!AllowAll) return Forbid();
+        //    // POST /api/debug/seed/feature-flags
+        //    [HttpPost("seed/feature-flags")]
+        //    public async Task<IActionResult> SeedFeatureFlags()
+        //    {
+        //        if (!AllowAll) return Forbid();
 
-    //        var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        //        var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
-    //        var flags = new[]
-    //        {
-    //    new { FlagName = "enable_panic_button", IsEnabled = true, Config = "{\"timeout\":30,\"escalation\":true}" },
-    //    new { FlagName = "enable_geofencing", IsEnabled = true, Config = "{\"radius\":100}" },
-    //    new { FlagName = "enable_live_tracking", IsEnabled = true, Config = "{}" },
-    //    new { FlagName = "enable_reports", IsEnabled = true, Config = "{\"daily\":true,\"weekly\":true}" },
-    //    new { FlagName = "enable_multi_language", IsEnabled = false, Config = "{\"languages\":[\"en\",\"ar\"]}" }
-    //};
+        //        var flags = new[]
+        //        {
+        //    new { FlagName = "enable_panic_button", IsEnabled = true, Config = "{\"timeout\":30,\"escalation\":true}" },
+        //    new { FlagName = "enable_geofencing", IsEnabled = true, Config = "{\"radius\":100}" },
+        //    new { FlagName = "enable_live_tracking", IsEnabled = true, Config = "{}" },
+        //    new { FlagName = "enable_reports", IsEnabled = true, Config = "{\"daily\":true,\"weekly\":true}" },
+        //    new { FlagName = "enable_multi_language", IsEnabled = false, Config = "{\"languages\":[\"en\",\"ar\"]}" }
+        //};
 
-    //        int added = 0;
-    //        foreach (var f in flags)
-    //        {
-    //            if (!await _db.FeatureFlags.AnyAsync(ff => ff.FlagName == f.FlagName && ff.TenantId == defaultTenantId))
-    //            {
-    //                _db.FeatureFlags.Add(new FeatureFlag
-    //                {
-    //                    TenantId = defaultTenantId,
-    //                    FlagName = f.FlagName,
-    //                    IsEnabled = f.IsEnabled,
-    //                    Config = f.Config,
-    //                    UpdatedAt = DateTime.UtcNow
-    //                });
-    //                added++;
-    //            }
-    //        }
+        //        int added = 0;
+        //        foreach (var f in flags)
+        //        {
+        //            if (!await _db.FeatureFlags.AnyAsync(ff => ff.FlagName == f.FlagName && ff.TenantId == defaultTenantId))
+        //            {
+        //                _db.FeatureFlags.Add(new FeatureFlag
+        //                {
+        //                    TenantId = defaultTenantId,
+        //                    FlagName = f.FlagName,
+        //                    IsEnabled = f.IsEnabled,
+        //                    Config = f.Config,
+        //                    UpdatedAt = DateTime.UtcNow
+        //                });
+        //                added++;
+        //            }
+        //        }
 
-    //        if (added > 0) await _db.SaveChangesAsync();
+        //        if (added > 0) await _db.SaveChangesAsync();
 
-    //        return Ok(new { message = $"Seeded {added} feature flags for default tenant" });
-    //    }
+        //        return Ok(new { message = $"Seeded {added} feature flags for default tenant" });
+        //    }
+
+        [HttpPost("seed/notification-categories")]
+        public async Task<IActionResult> SeedNotificationCategories()
+        {
+            if (!AllowAll) return Forbid();
+
+            var categories = new[]
+            {
+        new NotificationCategory { Id = 1, Key = "security", Name = "Security Notifications" },
+        new NotificationCategory { Id = 2, Key = "system", Name = "System Notifications" },
+        new NotificationCategory { Id = 3, Key = "safety", Name = "Safety Alerts" },
+        new NotificationCategory { Id = 4, Key = "snooze", Name = "Snooze Notifications" }
+    };
+
+            int added = 0;
+            foreach (var cat in categories)
+            {
+                if (!await _db.NotificationCategories.AnyAsync(c => c.Id == cat.Id))
+                {
+                    _db.NotificationCategories.Add(cat);
+                    added++;
+                }
+            }
+
+            if (added > 0) await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Seeded {added} notification categories" });
+        }
+
+        [HttpPost("seed/snooze-reasons")]
+        public async Task<IActionResult> SeedSnoozeReasons()
+        {
+            if (!AllowAll) return Forbid();
+
+            var config = _snoozeConfig.Value.SnoozeReasons;
+            if (config == null || !config.Any())
+                return BadRequest("No snooze reasons configured in appsettings");
+
+            int added = 0;
+            foreach (var item in config)
+            {
+                if (!await _db.SnoozeReasons.AnyAsync(sr => sr.Key == item.Key))
+                {
+                    _db.SnoozeReasons.Add(new SnoozeReason
+                    {
+                        Key = item.Key,
+                        Label = item.Label,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                    added++;
+                }
+            }
+
+            if (added > 0) await _db.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Seeded {added} snooze reasons (total {config.Count})"
+            });
+        }
+
+        [HttpPost("seed/notifications")]
+        public async Task<IActionResult> SeedNotifications()
+        {
+            if (!AllowAll) return Forbid();
+
+            var currentUserId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                                           ?? "7bdcdd13-8eb7-4021-993c-30aeff71b704"); // fallback to super admin if no claim (should not happen)
+
+            var deviceIds = await _db.Devices.Select(d => d.Id).Take(10).ToListAsync();
+            var random = new Random();
+
+            var categories = new[]
+            {
+        (Id: (short)1, Key: "security"),
+        (Id: (short)2, Key: "system"),
+        (Id: (short)3, Key: "safety"),
+        (Id: (short)4, Key: "snooze")
+    };
+
+            var types = new[]
+            {
+        "movement_detected", "battery_low", "offline", "online", "emergency", "distress",
+        "active_shooter", "emergency_911", "emergency_988", "geofence_breach"
+    };
+
+            var titles = new[]
+            {
+        "Movement Detected", "Battery Low", "Device Offline", "Device Online",
+        "Emergency Alert", "Distress Signal", "Active Shooter Alert",
+        "Emergency 911", "Emergency 988", "Geofence Breach"
+    };
+
+            var bodies = new[]
+            {
+        "Unexpected movement detected on safety card.",
+        "Battery level critically low — please charge.",
+        "Safety card has gone offline.",
+        "Safety card is now back online.",
+        "Critical emergency — immediate assistance needed.",
+        "User activated distress signal.",
+        "Active shooter situation reported.",
+        "Emergency services requested (911).",
+        "Mental health crisis support requested (988).",
+        "User has exited designated safe zone."
+    };
+
+            int added = 0;
+            for (int i = 0; i < 50; i++)
+            {
+                var category = categories[random.Next(categories.Length)];
+                var typeKey = types[random.Next(types.Length)];
+
+                var notification = new Notification
+                {
+                    OwnerUserId = currentUserId,
+                    InitiatorUserId = currentUserId,
+                    CategoryId = category.Id,
+                    TypeKey = typeKey,
+                    Priority = (NotificationPriority)random.Next(0, 4), // Low to Critical
+                    State = NotificationState.Open,
+                    Title = titles[random.Next(titles.Length)],
+                    Body = bodies[random.Next(bodies.Length)],
+                    Sound = random.Next(0, 4) switch
+                    {
+                        0 => "Emergency.wav",
+                        1 => "Alert.wav",
+                        2 => "NotificationSound.mp3",
+                        _ => null
+                    },
+                    ContentAvailable = true,
+                    DeviceId = deviceIds.Any() ? deviceIds[random.Next(deviceIds.Count)] : null,
+                    BatteryLevel = (short)random.Next(5, 101),
+                    SignalStrength = (short)random.Next(-100, -30),
+                    SignalQuality = new[] { "POOR", "FAIR", "GOOD", "EXCELLENT" }[random.Next(4)],
+                    Location = JsonSerializer.Serialize(new
+                    {
+                        lat = 24.7136 + (random.NextDouble() - 0.5) * 0.2, // Riyadh area
+                        lng = 46.6753 + (random.NextDouble() - 0.5) * 0.2
+                    }),
+                    RawEvent = JsonSerializer.Serialize(new { test = true, index = i }),
+                    EventTimestamp = DateTime.UtcNow.AddHours(-random.Next(1, 720)) // Spread over last 30 days
+                };
+
+                // Avoid duplicates
+                if (!await _db.Notifications.AnyAsync(n =>
+                    n.Title == notification.Title &&
+                    n.Body == notification.Body &&
+                    n.EventTimestamp == notification.EventTimestamp))
+                {
+                    _db.Notifications.Add(notification);
+                    added++;
+                }
+            }
+
+            if (added > 0)
+            {
+                await _db.SaveChangesAsync();
+
+                // Create deliveries for the current logged-in user
+                var newNotifications = await _db.Notifications
+                    .Where(n => n.OwnerUserId == currentUserId)
+                    .OrderByDescending(n => n.CreatedAt)
+                    .Take(added)
+                    .ToListAsync();
+
+                foreach (var n in newNotifications)
+                {
+                    var delivery = new NotificationRecipient
+                    {
+                        NotificationId = n.Id,
+                        RecipientUserId = currentUserId,
+                        OriginDisplay = JsonSerializer.Serialize(new
+                        {
+                            ownerName = "Test User",
+                            initiatorName = "System"
+                        })
+                    };
+                    _db.NotificationRecipients.Add(delivery);
+                }
+
+                await _db.SaveChangesAsync();
+            }
+
+            return Ok(new
+            {
+                message = $"Seeded {added} sample notifications for current user",
+                userId = currentUserId,
+                note = "Use GET /notifications to view them. All notifications belong to the logged-in user."
+            });
+        }
 
     }
 

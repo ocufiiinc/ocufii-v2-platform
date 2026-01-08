@@ -285,6 +285,34 @@ public class DevicesController : ControllerBase
         return Ok(new ApiResponse(true, "Credentials revoked successfully"));
     }
 
+    [HttpPost("{deviceId:guid}/verify-credentials")]
+    public async Task<ActionResult<ApiResponse>> VerifyCredentials(Guid deviceId, [FromBody] VerifyCredentialsRequest request)
+    {
+        if (request == null || string.IsNullOrEmpty(request.MqttUsername) || string.IsNullOrEmpty(request.MqttPassword))
+            return BadRequest(new ApiResponse(false, "MqttUsername and MqttPassword are required"));
+
+        var cred = await _db.DeviceCredentials
+            .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.IsEnabled);
+
+        if (cred == null)
+            return NotFound(new ApiResponse(false, "Credentials not found or disabled"));
+
+        // Compare username first
+        if (!string.Equals(cred.MqttUsername, request.MqttUsername, StringComparison.OrdinalIgnoreCase))
+            return Ok(new ApiResponse(true, "Verification result")
+            {
+                Data = new { isValid = false }
+            });
+
+        // Verify password using BCrypt
+        bool isValid = BCrypt.Net.BCrypt.Verify(request.MqttPassword, cred.PasswordHash);
+
+        return Ok(new ApiResponse(true, "Verification result")
+        {
+            Data = new { isValid }
+        });
+    }
+
     [HttpGet("{deviceId:guid}/telemetry")]
     public async Task<ActionResult<ApiResponse>> GetTelemetry(Guid deviceId, [FromQuery] int limit = 100, [FromQuery] DateTime? since = null)
     {

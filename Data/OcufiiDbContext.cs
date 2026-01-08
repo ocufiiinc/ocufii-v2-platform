@@ -20,9 +20,150 @@ namespace OcufiiAPI.Data
         public DbSet<DeviceTelemetry> DeviceTelemetry { get; set; } = null!;
         public DbSet<Feature> Features { get; set; } = null!;
         public DbSet<UserFeature> UserFeatures { get; set; } = null!;
+        public DbSet<NotificationCategory> NotificationCategories { get; set; } = null!;
+        public DbSet<NotificationType> NotificationTypes { get; set; } = null!;
+        public DbSet<Notification> Notifications { get; set; } = null!;
+        public DbSet<NotificationRecipient> NotificationRecipients { get; set; } = null!;
+        public DbSet<NotificationAction> NotificationActions { get; set; } = null!;
+        public DbSet<SnoozeReason> SnoozeReasons { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<SnoozeReason>(entity =>
+            {
+                entity.ToTable("SnoozeReasons");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Key).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Label).IsRequired().HasMaxLength(200);
+                entity.HasIndex(e => e.Key).IsUnique();
+            });
+
+            // Enums
+            modelBuilder.HasPostgresEnum<NotificationState>();
+            modelBuilder.HasPostgresEnum<NotificationActionType>();
+            modelBuilder.HasPostgresEnum<NotificationPriority>();
+
+            // NotificationCategories
+            modelBuilder.Entity<NotificationCategory>(entity =>
+            {
+                entity.ToTable("NotificationCategories");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Key).IsRequired().HasMaxLength(50);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.HasIndex(e => e.Key).IsUnique();
+            });
+
+            // NotificationTypes
+            modelBuilder.Entity<NotificationType>(entity =>
+            {
+                entity.ToTable("NotificationTypes");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Key).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+                entity.HasIndex(e => e.Key).IsUnique();
+                entity.HasOne(nt => nt.Category)
+                      .WithMany(nc => nc.Types)
+                      .HasForeignKey(nt => nt.CategoryId);
+            });
+
+            // Notifications
+            modelBuilder.Entity<Notification>(entity =>
+            {
+                entity.ToTable("Notifications");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.Title).IsRequired();
+                entity.Property(e => e.Location).HasColumnType("jsonb");
+                entity.Property(e => e.RawEvent).HasColumnType("jsonb");
+                entity.Property(e => e.EventTimestamp).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+                entity.HasOne(n => n.OwnerUser)
+                      .WithMany()
+                      .HasForeignKey(n => n.OwnerUserId)
+                      .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(n => n.InitiatorUser)
+                      .WithMany()
+                      .HasForeignKey(n => n.InitiatorUserId)
+                      .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(n => n.Device)
+                      .WithMany()
+                      .HasForeignKey(n => n.DeviceId)
+                      .OnDelete(DeleteBehavior.SetNull);
+
+                entity.HasOne(n => n.ViaDevice)
+                      .WithMany()
+                      .HasForeignKey(n => n.ViaDeviceId)
+                      .OnDelete(DeleteBehavior.SetNull);
+
+                entity.HasOne(n => n.InitiatorDevice)
+                      .WithMany()
+                      .HasForeignKey(n => n.InitiatorDeviceId)
+                      .OnDelete(DeleteBehavior.SetNull);
+
+                entity.HasOne(n => n.Category)
+                      .WithMany()
+                      .HasForeignKey(n => n.CategoryId);
+
+                entity.HasOne(n => n.Type)
+                      .WithMany()
+                      .HasForeignKey(n => n.TypeId)
+                      .OnDelete(DeleteBehavior.SetNull);
+
+                // Indexes
+                entity.HasIndex(n => new { n.OwnerUserId, n.EventTimestamp });
+                entity.HasIndex(n => new { n.InitiatorUserId, n.EventTimestamp });
+                entity.HasIndex(n => n.State);
+                entity.HasIndex(n => n.DeviceId);
+            });
+
+            // NotificationRecipients
+            modelBuilder.Entity<NotificationRecipient>(entity =>
+            {
+                entity.ToTable("NotificationRecipients");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.OriginDisplay).HasColumnType("jsonb").HasDefaultValue("{}");
+
+                entity.HasOne(nr => nr.Notification)
+                      .WithMany(n => n.Recipients)
+                      .HasForeignKey(nr => nr.NotificationId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(nr => nr.RecipientUser)
+                      .WithMany()
+                      .HasForeignKey(nr => nr.RecipientUserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasIndex(nr => nr.RecipientUserId);
+                entity.HasIndex(nr => nr.NotificationId);
+                entity.HasIndex(nr => new { nr.NotificationId, nr.RecipientUserId }).IsUnique();
+            });
+
+            // NotificationActions
+            modelBuilder.Entity<NotificationAction>(entity =>
+            {
+                entity.ToTable("NotificationActions");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+                entity.Property(e => e.Comment).IsRequired();
+
+                entity.HasOne(na => na.Notification)
+                      .WithMany(n => n.Actions)
+                      .HasForeignKey(na => na.NotificationId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(na => na.ActorUser)
+                      .WithMany()
+                      .HasForeignKey(na => na.ActorUserId)
+                      .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasIndex(na => new { na.NotificationId, na.CreatedAt });
+            });
+
             modelBuilder.HasPostgresEnum("TelemetrySource", new[] { "gateway", "beacon", "safety_card" });
             modelBuilder.HasPostgresEnum("NotificationSoundType", new[] { "DEFAULT", "FIRE", "EMERGENCY" });
 

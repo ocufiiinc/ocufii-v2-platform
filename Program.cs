@@ -93,6 +93,7 @@ builder.Services.AddScoped<IAuthorizationHandler, SameUserOrAdminHandler>(); // 
 // Configs
 builder.Services.Configure<JwtConfig>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<LegacyConfig>(builder.Configuration.GetSection("LegacyConfig"));
+builder.Services.Configure<SnoozeReasonConfig>(builder.Configuration.GetSection("SnoozeReasons"));
 
 // JWT Authentication
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtConfig>()!;
