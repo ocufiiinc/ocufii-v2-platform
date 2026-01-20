@@ -16,6 +16,7 @@ using System.Text;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using OcufiiAPI.Data;
 
 namespace OcufiiAPI.Controllers;
 
@@ -29,16 +30,19 @@ public class AuthController : ControllerBase
     private readonly JwtConfig _jwt;
     private readonly LegacyConfig _legacy;
     private readonly PasswordHasher<User> _hasher = new();
+    private readonly OcufiiDbContext _db;
 
     public AuthController(
         IRepository<User> userRepo,
         IRepository<Role> roleRepo,
         IRepository<RefreshToken> refreshRepo,
+        OcufiiDbContext db,
         IOptions<JwtConfig> jwtOptions,
         IOptions<LegacyConfig> legacyOptions)
     {
         _userRepo = userRepo;
         _roleRepo = roleRepo;
+        _db = db;
         _refreshRepo = refreshRepo;
         _jwt = jwtOptions.Value;
         _legacy = legacyOptions.Value;
@@ -72,6 +76,62 @@ public class AuthController : ControllerBase
                 user = new { user.Email, user.FirstName, user.LastName, user.Company }
             }
         });
+    }
+
+    [HttpPost("device-token")]
+    [Authorize]
+    public async Task<ActionResult<ApiResponse>> RegisterDeviceToken([FromBody] DeviceTokenRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.DeviceTokenValue))
+            return BadRequest(new ApiResponse(false, "DeviceTokenValue is required"));
+
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        // Find if this token is already used by ANY user
+        var existingToken = await _db.DeviceToken
+            .FirstOrDefaultAsync(t => t.DeviceTokenValue == request.DeviceTokenValue);
+
+        if (existingToken != null)
+        {
+            // Case 1: Token used by another user → reassign to current user
+            if (existingToken.UserId != userId)
+            {
+                existingToken.UserId = userId;
+                existingToken.MobileDevice = request.MobileDevice;
+                existingToken.MobileOsVersion = request.MobileOsVersion;
+                existingToken.Version = request.Version;
+
+                _db.DeviceToken.Update(existingToken);
+                await _db.SaveChangesAsync();
+
+                return Ok(new ApiResponse(true, "Device token reassigned to current user"));
+            }
+
+            // Case 2: Token already belongs to current user → update
+            existingToken.MobileDevice = request.MobileDevice;
+            existingToken.MobileOsVersion = request.MobileOsVersion;
+            existingToken.Version = request.Version;
+
+            _db.DeviceToken.Update(existingToken);
+            await _db.SaveChangesAsync();
+
+            return Ok(new ApiResponse(true, "Device token updated"));
+        }
+
+        // Case 3: New token → insert
+        var newToken = new DeviceToken
+        {
+            UserId = userId,
+            DeviceTokenValue = request.DeviceTokenValue,
+            MobileDevice = request.MobileDevice,
+            MobileOsVersion = request.MobileOsVersion,
+            Version = request.Version
+        };
+
+        _db.DeviceToken.Add(newToken);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Device token registered"));
     }
 
     [HttpPost("register")]

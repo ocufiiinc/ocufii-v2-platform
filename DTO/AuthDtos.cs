@@ -35,4 +35,12 @@
     {
         public string NewEmail { get; set; } = string.Empty;
     }
+
+    public class DeviceTokenRequest
+    {
+        public string DeviceTokenValue { get; set; } = string.Empty;
+        public string? MobileDevice { get; set; } 
+        public string? MobileOsVersion { get; set; } 
+        public string? Version { get; set; }
+    }
 }

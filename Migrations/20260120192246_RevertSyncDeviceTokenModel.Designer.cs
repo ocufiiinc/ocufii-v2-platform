@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OcufiiAPI.Data;
@@ -11,9 +12,11 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    partial class OcufiiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260120192246_RevertSyncDeviceTokenModel")]
+    partial class RevertSyncDeviceTokenModel
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -216,9 +219,6 @@ namespace OcufiiAPI.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("UserId1")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("Version")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
@@ -229,8 +229,6 @@ namespace OcufiiAPI.Migrations
                         .IsUnique();
 
                     b.HasIndex("UserId");
-
-                    b.HasIndex("UserId1");
 
                     b.ToTable("DeviceToken", (string)null);
                 });
@@ -961,15 +959,10 @@ namespace OcufiiAPI.Migrations
             modelBuilder.Entity("OcufiiAPI.Models.DeviceToken", b =>
                 {
                     b.HasOne("OcufiiAPI.Models.User", null)
-                        .WithMany()
+                        .WithMany("DeviceTokens")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_DeviceToken_Users_UserId");
-
-                    b.HasOne("OcufiiAPI.Models.User", null)
-                        .WithMany("DeviceTokens")
-                        .HasForeignKey("UserId1");
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("OcufiiAPI.Models.Feature", b =>

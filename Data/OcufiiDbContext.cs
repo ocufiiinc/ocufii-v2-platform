@@ -27,8 +27,30 @@ namespace OcufiiAPI.Data
         public DbSet<NotificationAction> NotificationActions { get; set; } = null!;
         public DbSet<SnoozeReason> SnoozeReasons { get; set; } = null!;
 
+        public DbSet<DeviceToken> DeviceToken { get; set; } = null!;
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<DeviceToken>(entity =>
+            {
+                entity.ToTable("DeviceToken");
+
+                entity.HasKey(e => e.DeviceTokenId);
+
+                entity.Property(e => e.DeviceTokenValue)
+                      .IsRequired()
+                      .HasMaxLength(255);
+
+                entity.HasIndex(e => e.DeviceTokenValue)
+                      .IsUnique();
+
+                entity.HasOne<User>() 
+                      .WithMany()
+                      .HasForeignKey(e => e.UserId)
+                      .OnDelete(DeleteBehavior.Cascade)
+                      .HasConstraintName("FK_DeviceToken_Users_UserId");
+            });
+
             modelBuilder.Entity<SnoozeReason>(entity =>
             {
                 entity.ToTable("SnoozeReasons");

@@ -5,7 +5,9 @@ namespace OcufiiAPI.Models
     public class DeviceToken
     {
         [Key]
-        public Guid UserId { get; set; }
+        public Guid DeviceTokenId { get; set; } = Guid.NewGuid();
+
+        public Guid UserId { get; set; } 
 
         [StringLength(255)]
         public string DeviceTokenValue { get; set; } = string.Empty;
@@ -18,7 +20,5 @@ namespace OcufiiAPI.Models
 
         [StringLength(50)]
         public string? Version { get; set; }
-
-        public User User { get; set; } = null!;
     }
 }

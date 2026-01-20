@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OcufiiAPI.Data;
@@ -11,9 +12,11 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    partial class OcufiiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260120190350_SyncDeviceTokenModel")]
+    partial class SyncDeviceTokenModel
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -196,8 +199,7 @@ namespace OcufiiAPI.Migrations
 
             modelBuilder.Entity("OcufiiAPI.Models.DeviceToken", b =>
                 {
-                    b.Property<Guid>("DeviceTokenId")
-                        .ValueGeneratedOnAdd()
+                    b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("DeviceTokenValue")
@@ -213,9 +215,6 @@ namespace OcufiiAPI.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid?>("UserId1")
                         .HasColumnType("uuid");
 
@@ -223,12 +222,10 @@ namespace OcufiiAPI.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.HasKey("DeviceTokenId");
+                    b.HasKey("UserId");
 
                     b.HasIndex("DeviceTokenValue")
                         .IsUnique();
-
-                    b.HasIndex("UserId");
 
                     b.HasIndex("UserId1");
 
@@ -960,16 +957,17 @@ namespace OcufiiAPI.Migrations
 
             modelBuilder.Entity("OcufiiAPI.Models.DeviceToken", b =>
                 {
-                    b.HasOne("OcufiiAPI.Models.User", null)
+                    b.HasOne("OcufiiAPI.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("FK_DeviceToken_Users_UserId");
+                        .IsRequired();
 
                     b.HasOne("OcufiiAPI.Models.User", null)
                         .WithMany("DeviceTokens")
                         .HasForeignKey("UserId1");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("OcufiiAPI.Models.Feature", b =>

@@ -102,34 +102,66 @@ public class DevicesController : ControllerBase
             return BadRequest(new ApiResponse(false, "Missing or invalid 'macAddress'"));
 
         var macAddress = macProp.GetString()!.Trim();
-        if (await _db.Devices.AnyAsync(d => d.MacAddress == macAddress))
-            return Conflict(new ApiResponse(false, "MacAddress already exists"));
+        var normalizedMac = macAddress.ToUpperInvariant().Replace(":", "");
+
+        // Check for active (not deleted) device
+        var activeDevice = await _db.Devices.FirstOrDefaultAsync(d =>
+            d.MacAddress.ToUpper() == normalizedMac && !d.IsDeleted);
+
+        if (activeDevice != null)
+            return Conflict(new ApiResponse(false, "MacAddress already exists and is active"));
 
         var currentUserId = User.GetUserId();
         var tenantIdClaim = User.FindFirst("tenant_id")?.Value
-                             ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
+                            ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
 
-        var device = new Device
+        // Check if soft-deleted exists — reuse/update it
+        var softDeletedDevice = await _db.Devices.FirstOrDefaultAsync(d =>
+            d.MacAddress.ToUpper() == normalizedMac && d.IsDeleted);
+
+        Device device;
+
+        if (softDeletedDevice != null)
         {
-            Id = Guid.NewGuid(),
-            DeviceTypeId = deviceType.Id,
-            MacAddress = macAddress,
-            Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null,
-            Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : null,
-            Information = body.TryGetProperty("information", out var i) ? i.GetString()?.Trim() : null,
-            Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : "{}",
-            UserId = currentUserId,  
-            TenantId = Guid.Parse(tenantIdClaim),  
-            IsEnabled = true,
-            IsDeleted = false,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+            // Reuse soft-deleted device
+            device = softDeletedDevice;
+            device.IsDeleted = false;
+            device.IsEnabled = true;
+            device.UserId = currentUserId;
+            device.TenantId = Guid.Parse(tenantIdClaim);
+            device.UpdatedAt = DateTime.UtcNow;
 
-        _db.Devices.Add(device);
+            // Optional: reset other fields
+            device.Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : device.Name;
+            device.Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : device.Location;
+            device.Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : device.Attributes ?? "{}";
+        }
+        else
+        {
+            // New device
+            device = new Device
+            {
+                Id = Guid.NewGuid(),
+                DeviceTypeId = deviceType.Id,
+                MacAddress = normalizedMac,
+                Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null,
+                Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : null,
+                Information = body.TryGetProperty("information", out var i) ? i.GetString()?.Trim() : null,
+                Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : "{}",
+                UserId = currentUserId,
+                TenantId = Guid.Parse(tenantIdClaim),
+                IsEnabled = true,
+                IsDeleted = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _db.Devices.Add(device);
+        }
+
         await _db.SaveChangesAsync();
 
-        return Created($"/devices/{device.Id}", new ApiResponse(true, "Device created successfully")
+        return Created($"/devices/{device.Id}", new ApiResponse(true, "Device created/reused successfully")
         {
             Data = new { deviceId = device.Id }
         });
@@ -343,6 +375,32 @@ public class DevicesController : ControllerBase
             Data = new { items }
         });
     }
+
+    [HttpGet("mac-address/check")]
+    public async Task<ActionResult<ApiResponse>> CheckMacAddressAvailability([FromQuery] string macAddress)
+    {
+        if (string.IsNullOrWhiteSpace(macAddress))
+            return BadRequest(new ApiResponse(false, "macAddress is required"));
+
+        var normalizedMac = macAddress.Trim().ToUpperInvariant().Replace(":", "");
+
+        var device = await _db.Devices
+            .FirstOrDefaultAsync(d => d.MacAddress.ToUpper() == normalizedMac);
+
+        bool isAvailable = device == null || device.IsDeleted;
+
+        return Ok(new ApiResponse(true, "MacAddress availability checked")
+        {
+            Data = new
+            {
+                macAddress = normalizedMac,
+                isAvailable,
+                isSoftDeleted = device?.IsDeleted ?? false,
+                existingDeviceId = device?.Id
+            }
+        });
+    }
+
 }
 
 public class IssueCredentialsRequest
