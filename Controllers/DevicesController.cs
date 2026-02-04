@@ -104,7 +104,6 @@ public class DevicesController : ControllerBase
         var macAddress = macProp.GetString()!.Trim();
         var normalizedMac = macAddress.ToUpperInvariant().Replace(":", "");
 
-        // Check for active (not deleted) device
         var activeDevice = await _db.Devices.FirstOrDefaultAsync(d =>
             d.MacAddress.ToUpper() == normalizedMac && !d.IsDeleted);
 
@@ -115,7 +114,6 @@ public class DevicesController : ControllerBase
         var tenantIdClaim = User.FindFirst("tenant_id")?.Value
                             ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
 
-        // Check if soft-deleted exists — reuse/update it
         var softDeletedDevice = await _db.Devices.FirstOrDefaultAsync(d =>
             d.MacAddress.ToUpper() == normalizedMac && d.IsDeleted);
 
@@ -123,7 +121,6 @@ public class DevicesController : ControllerBase
 
         if (softDeletedDevice != null)
         {
-            // Reuse soft-deleted device
             device = softDeletedDevice;
             device.IsDeleted = false;
             device.IsEnabled = true;
@@ -131,14 +128,12 @@ public class DevicesController : ControllerBase
             device.TenantId = Guid.Parse(tenantIdClaim);
             device.UpdatedAt = DateTime.UtcNow;
 
-            // Optional: reset other fields
             device.Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : device.Name;
             device.Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : device.Location;
             device.Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : device.Attributes ?? "{}";
         }
         else
         {
-            // New device
             device = new Device
             {
                 Id = Guid.NewGuid(),
@@ -329,14 +324,12 @@ public class DevicesController : ControllerBase
         if (cred == null)
             return NotFound(new ApiResponse(false, "Credentials not found or disabled"));
 
-        // Compare username first
         if (!string.Equals(cred.MqttUsername, request.MqttUsername, StringComparison.OrdinalIgnoreCase))
             return Ok(new ApiResponse(true, "Verification result")
             {
                 Data = new { isValid = false }
             });
 
-        // Verify password using BCrypt
         bool isValid = BCrypt.Net.BCrypt.Verify(request.MqttPassword, cred.PasswordHash);
 
         return Ok(new ApiResponse(true, "Verification result")

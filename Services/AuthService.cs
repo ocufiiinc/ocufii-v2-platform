@@ -39,7 +39,7 @@ namespace OcufiiAPI.Services
             {
                 UserId = Guid.NewGuid(),
                 Email = email,
-                Password = password, // TODO: Hash in production
+                Password = password,
                 FirstName = firstName,
                 RoleId = roleEntity.RoleId,
                 AccountType = "single",

@@ -8,11 +8,6 @@ namespace OcufiiAPI.DTO
         public string? CustomWorkflows { get; set; }
     }
 
-    //public class CreateDependentRequest : CreateUserRequest
-    //{
-    //    public List<AssignFeatureRequest>? Features { get; set; }
-    //}
-
     public class CreateUserRequest
     {
         public string Email { get; set; } = string.Empty;
@@ -31,8 +26,8 @@ namespace OcufiiAPI.DTO
         public string LastName { get; set; } = string.Empty;
         public string? PhoneNumber { get; set; }
         public string? Company { get; set; }
-        public string? Role { get; set; } = "user";  // Default
-        public List<AssignFeatureRequest>? Features { get; set; }  // New — assign during creation
+        public string? Role { get; set; } = "user";
+        public List<AssignFeatureRequest>? Features { get; set; }  
     }
 
     public class AssignFeatureRequest

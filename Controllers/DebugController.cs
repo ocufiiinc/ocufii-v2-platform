@@ -430,20 +430,16 @@ namespace OcufiiAPI.Controllers
 
         private string GetLogsPath()
         {
-            var projectRoot = Directory.GetCurrentDirectory();           // ← THIS IS PROJECT ROOT
+            var projectRoot = Directory.GetCurrentDirectory();
             var projectRootLogs = Path.Combine(projectRoot, "logs");
 
-            // 1. DEVELOPMENT & TESTDEVWEB: Use project root logs folder
-            //var projectRootLogs = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "logs"));
             if (Directory.Exists(projectRootLogs))
                 return projectRootLogs;
 
-            // 2. PUBLISHED / PRODUCTION: Use logs next to .exe
             var publishedLogs = Path.Combine(AppContext.BaseDirectory, "logs");
             if (Directory.Exists(publishedLogs))
                 return publishedLogs;
 
-            // 3. IF STILL NOT FOUND → CREATE IT NEXT TO EXE (for first publish)
             Directory.CreateDirectory(publishedLogs);
             return publishedLogs;
         }
@@ -479,7 +475,7 @@ namespace OcufiiAPI.Controllers
             return Ok(new { message = "Default tenant ready" });
         }
 
-        private readonly PasswordHasher<User> _hasher = new(); // ← Add this field in DebugController
+        private readonly PasswordHasher<User> _hasher = new();
 
         [HttpPost("seed/super-admin")]
         public async Task<IActionResult> SeedSuperAdmin()
@@ -517,7 +513,7 @@ namespace OcufiiAPI.Controllers
                 PhoneNumber = "+966500000000",
                 Company = "Ocufii Global",
                 Username = "superadmin",
-                Password = _hasher.HashPassword(null!, adminPassword), // ← CORRECT HASH
+                Password = _hasher.HashPassword(null!, adminPassword),
                 RoleId = superAdminRole.RoleId,
                 TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001"),
                 IsEnabled = true,
@@ -538,7 +534,6 @@ namespace OcufiiAPI.Controllers
             });
         }
 
-        // POST /api/debug/seed/features
         [HttpPost("seed/features")]
         public async Task<IActionResult> SeedFeatures()
         {
@@ -578,7 +573,6 @@ namespace OcufiiAPI.Controllers
             return Ok(new { message = $"Seeded {added} features (total {features.Length})" });
         }
 
-        //    // POST /api/debug/seed/feature-flags
         //    [HttpPost("seed/feature-flags")]
         //    public async Task<IActionResult> SeedFeatureFlags()
         //    {
@@ -683,7 +677,7 @@ namespace OcufiiAPI.Controllers
             if (!AllowAll) return Forbid();
 
             var currentUserId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                                           ?? "7bdcdd13-8eb7-4021-993c-30aeff71b704"); // fallback to super admin if no claim (should not happen)
+                                           ?? "7bdcdd13-8eb7-4021-993c-30aeff71b704");
 
             var deviceIds = await _db.Devices.Select(d => d.Id).Take(10).ToListAsync();
             var random = new Random();
@@ -735,7 +729,7 @@ namespace OcufiiAPI.Controllers
                     InitiatorUserId = currentUserId,
                     CategoryId = category.Id,
                     TypeKey = typeKey,
-                    Priority = (NotificationPriority)random.Next(0, 4), // Low to Critical
+                    Priority = (NotificationPriority)random.Next(0, 4),
                     State = NotificationState.Open,
                     Title = titles[random.Next(titles.Length)],
                     Body = bodies[random.Next(bodies.Length)],
@@ -753,11 +747,11 @@ namespace OcufiiAPI.Controllers
                     SignalQuality = new[] { "POOR", "FAIR", "GOOD", "EXCELLENT" }[random.Next(4)],
                     Location = JsonSerializer.Serialize(new
                     {
-                        lat = 24.7136 + (random.NextDouble() - 0.5) * 0.2, // Riyadh area
+                        lat = 24.7136 + (random.NextDouble() - 0.5) * 0.2,
                         lng = 46.6753 + (random.NextDouble() - 0.5) * 0.2
                     }),
                     RawEvent = JsonSerializer.Serialize(new { test = true, index = i }),
-                    EventTimestamp = DateTime.UtcNow.AddHours(-random.Next(1, 720)) // Spread over last 30 days
+                    EventTimestamp = DateTime.UtcNow.AddHours(-random.Next(1, 720))
                 };
 
                 // Avoid duplicates
@@ -775,7 +769,6 @@ namespace OcufiiAPI.Controllers
             {
                 await _db.SaveChangesAsync();
 
-                // Create deliveries for the current logged-in user
                 var newNotifications = await _db.Notifications
                     .Where(n => n.OwnerUserId == currentUserId)
                     .OrderByDescending(n => n.CreatedAt)

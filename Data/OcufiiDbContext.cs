@@ -6,8 +6,6 @@ namespace OcufiiAPI.Data
     public class OcufiiDbContext : DbContext
     {
         public OcufiiDbContext(DbContextOptions<OcufiiDbContext> options) : base(options) { }
-
-        // USED TABLES ONLY
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<Role> Roles { get; set; } = null!;
         public DbSet<Tenant> Tenants { get; set; } = null!;
@@ -65,7 +63,6 @@ namespace OcufiiAPI.Data
             modelBuilder.HasPostgresEnum<NotificationActionType>();
             modelBuilder.HasPostgresEnum<NotificationPriority>();
 
-            // NotificationCategories
             modelBuilder.Entity<NotificationCategory>(entity =>
             {
                 entity.ToTable("NotificationCategories");
@@ -75,7 +72,6 @@ namespace OcufiiAPI.Data
                 entity.HasIndex(e => e.Key).IsUnique();
             });
 
-            // NotificationTypes
             modelBuilder.Entity<NotificationType>(entity =>
             {
                 entity.ToTable("NotificationTypes");
@@ -88,7 +84,6 @@ namespace OcufiiAPI.Data
                       .HasForeignKey(nt => nt.CategoryId);
             });
 
-            // Notifications
             modelBuilder.Entity<Notification>(entity =>
             {
                 entity.ToTable("Notifications");
@@ -135,14 +130,12 @@ namespace OcufiiAPI.Data
                       .HasForeignKey(n => n.TypeId)
                       .OnDelete(DeleteBehavior.SetNull);
 
-                // Indexes
                 entity.HasIndex(n => new { n.OwnerUserId, n.EventTimestamp });
                 entity.HasIndex(n => new { n.InitiatorUserId, n.EventTimestamp });
                 entity.HasIndex(n => n.State);
                 entity.HasIndex(n => n.DeviceId);
             });
 
-            // NotificationRecipients
             modelBuilder.Entity<NotificationRecipient>(entity =>
             {
                 entity.ToTable("NotificationRecipients");
@@ -165,7 +158,6 @@ namespace OcufiiAPI.Data
                 entity.HasIndex(nr => new { nr.NotificationId, nr.RecipientUserId }).IsUnique();
             });
 
-            // NotificationActions
             modelBuilder.Entity<NotificationAction>(entity =>
             {
                 entity.ToTable("NotificationActions");
@@ -189,7 +181,6 @@ namespace OcufiiAPI.Data
             modelBuilder.HasPostgresEnum("TelemetrySource", new[] { "gateway", "beacon", "safety_card" });
             modelBuilder.HasPostgresEnum("NotificationSoundType", new[] { "DEFAULT", "FIRE", "EMERGENCY" });
 
-            // DeviceTypes
             modelBuilder.Entity<DeviceType>(entity =>
             {
                 entity.ToTable("DeviceTypes");
@@ -203,7 +194,6 @@ namespace OcufiiAPI.Data
                 entity.HasIndex(e => e.Key).IsUnique();
             });
 
-            // Devices
             modelBuilder.Entity<Device>(entity =>
             {
                 entity.ToTable("Devices");
@@ -226,7 +216,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.SetNull);
             });
 
-            // DeviceCredentials
             modelBuilder.Entity<DeviceCredential>(entity =>
             {
                 entity.ToTable("DeviceCredentials");
@@ -244,7 +233,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // DeviceTelemetry
             modelBuilder.Entity<DeviceTelemetry>(entity =>
             {
                 entity.ToTable("DeviceTelemetry");
@@ -259,7 +247,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Restrict);
             });
 
-            // RefreshTokens
             modelBuilder.Entity<RefreshToken>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -273,7 +260,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // UserSettings
             modelBuilder.Entity<UserSetting>(entity =>
             {
                 entity.ToTable("UserSettings");
@@ -292,7 +278,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // UserAssistSettings
             modelBuilder.Entity<UserAssistSetting>(entity =>
             {
                 entity.ToTable("UserAssistSettings");
@@ -305,7 +290,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // Tenants
             modelBuilder.Entity<Tenant>(entity =>
             {
                 entity.ToTable("Tenants");
@@ -316,7 +300,6 @@ namespace OcufiiAPI.Data
                 entity.Property(e => e.DateUpdated).HasDefaultValueSql("now()");
             });
 
-            // Features
             modelBuilder.Entity<Feature>(entity =>
             {
                 entity.ToTable("Features");
@@ -330,7 +313,6 @@ namespace OcufiiAPI.Data
                 entity.HasIndex(e => e.Key).IsUnique();
             });
 
-            // UserFeatures
             modelBuilder.Entity<UserFeature>(entity =>
             {
                 entity.ToTable("UserFeatures");
@@ -349,7 +331,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // Users
             modelBuilder.Entity<User>(entity =>
             {
                 entity.Property(e => e.ParentId).HasColumnType("uuid");
@@ -367,7 +348,6 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.SetNull);
             });
 
-            // Timestamp with time zone
             var dateTimeProperties = modelBuilder.Model.GetEntityTypes()
                 .SelectMany(e => e.GetProperties())
                 .Where(p => p.ClrType == typeof(DateTime) || p.ClrType == typeof(DateTime?))

@@ -21,7 +21,6 @@ public class AdminController : ControllerBase
         _db = db;
     }
 
-    // GET /admin/tenants — Super Admin only
     [HttpGet("tenants")]
     [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse>> ListTenants()
@@ -60,7 +59,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // POST /admin/tenants — Super Admin only
     [HttpPost("tenants")]
     [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse>> CreateTenant([FromBody] CreateTenantRequest request)
@@ -83,7 +81,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // GET /admin/users — Tenant Admins see their tenant, Super Admin sees all
     [HttpGet("users")]
     public async Task<ActionResult<ApiResponse>> ListUsers()
     {
@@ -122,7 +119,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // POST /admin/users — Create top-level user
     [HttpPost("users")]
     public async Task<ActionResult<ApiResponse>> CreateUser([FromBody] CreateUserRequest request)
     {
@@ -161,7 +157,7 @@ public class AdminController : ControllerBase
             Password = _hasher.HashPassword(null!, "TempPass@2025!"),
             RoleId = role.RoleId,
             TenantId = tenantId,
-            ParentId = currentUser.UserId, // Top-level admin creates
+            ParentId = currentUser.UserId,
             IsEnabled = true,
             IsDeleted = false,
             DateSubmitted = DateTime.UtcNow,
@@ -177,7 +173,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // POST /admin/users/{id}/dependents — Create dependent user with features
     [HttpPost("users/{id:guid}/dependents")]
     public async Task<ActionResult<ApiResponse>> CreateDependent(Guid id, [FromBody] CreateDependentRequest request)
     {
@@ -199,7 +194,7 @@ public class AdminController : ControllerBase
             PhoneNumber = request.PhoneNumber,
             Company = request.Company ?? parent.Company,
             Username = request.Email.Split('@')[0],
-            Password = _hasher.HashPassword(null!, "TempPass@2025!"), // Change later
+            Password = _hasher.HashPassword(null!, "TempPass@2025!"),
             RoleId = userRole.RoleId,
             TenantId = parent.TenantId,
             ParentId = parent.UserId,
@@ -212,14 +207,13 @@ public class AdminController : ControllerBase
         _db.Users.Add(dependent);
         await _db.SaveChangesAsync();
 
-        // Assign features if provided
         var assignedFeatures = new List<UserFeature>();
         if (request.Features != null)
         {
             foreach (var f in request.Features)
             {
                 var feature = await _db.Features.FirstOrDefaultAsync(x => x.Id == f.FeatureId);
-                if (feature == null) continue;  // Skip invalid
+                if (feature == null) continue;
 
                 var userFeature = new UserFeature
                 {
@@ -251,7 +245,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // GET /admin/users/{id}/features — Get features for dependent
     [HttpGet("users/{id:guid}/features")]
     public async Task<ActionResult<ApiResponse>> GetUserFeatures(Guid id)
     {
@@ -279,7 +272,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // GET /admin/features — List all features (for getting IDs)
     [HttpGet("features")]
     public async Task<ActionResult<ApiResponse>> ListFeatures()
     {
@@ -298,7 +290,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // POST /admin/users/{id}/features — Assign feature to dependent
     [HttpPost("users/{id:guid}/features")]
     public async Task<ActionResult<ApiResponse>> AssignFeature(Guid id, [FromBody] AssignFeatureRequest request)
     {
@@ -341,7 +332,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // PATCH /admin/users/{id}/features/{featureId} — Update feature
     [HttpPatch("users/{id:guid}/features/{featureId:guid}")]
     public async Task<ActionResult<ApiResponse>> UpdateFeature(Guid id, Guid featureId, [FromBody] UpdateFeatureRequest request)
     {
@@ -367,7 +357,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    // DELETE /admin/users/{id}/features/{featureId} — Remove feature
     [HttpDelete("users/{id:guid}/features/{featureId:guid}")]
     public async Task<ActionResult<ApiResponse>> RemoveFeature(Guid id, Guid featureId)
     {
@@ -382,7 +371,6 @@ public class AdminController : ControllerBase
     }
 }
 
-// NEW DTO for CreateDependent with features
 public class CreateDependentRequest : CreateUserRequest
 {
     public List<AssignFeatureRequest>? Features { get; set; }

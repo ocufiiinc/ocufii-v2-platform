@@ -74,7 +74,6 @@ public class SettingsController : ControllerBase
         return setting;
     }
 
-    // PATCH /api/settings/me
     [HttpPatch]
     public async Task<IActionResult> Update([FromBody] UpdateSettingsDto dto)
     {
@@ -108,7 +107,6 @@ public class SettingsController : ControllerBase
         return Ok(new ApiResponse(true, "Settings updated"));
     }
 
-    // GET /api/settings/me
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -132,7 +130,6 @@ public class SettingsController : ControllerBase
         return Ok(new { ok = true, data });
     }
 
-    // GET /api/settings/me/assist
     [HttpGet("assist")]
     public async Task<IActionResult> GetAssist()
     {
@@ -141,7 +138,6 @@ public class SettingsController : ControllerBase
         return Ok(JsonSerializer.Deserialize<object>(setting.Config));
     }
 
-    // PATCH /api/settings/me/assist/{key}
     [HttpPatch("assist/{key}")]
     public async Task<IActionResult> UpdateAssist(string key, [FromBody] UpdateAssistDto dto)
     {
@@ -172,7 +168,6 @@ public class SettingsController : ControllerBase
         return Ok(new ApiResponse(true, "Assist settings updated"));
     }
 
-    // POST /api/settings/me/terms
     [HttpPost("terms")]
     public async Task<IActionResult> AcceptTerms([FromBody] AcceptTermsDto dto)
     {
@@ -190,7 +185,6 @@ public class SettingsController : ControllerBase
         return Ok(new ApiResponse(true, "Terms accepted"));
     }
 
-    // GET /api/settings/me/terms
     [HttpGet("terms")]
     public async Task<IActionResult> GetTerms()
     {

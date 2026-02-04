@@ -18,10 +18,10 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var projectRoot = Directory.GetCurrentDirectory();           // ← THIS IS PROJECT ROOT
+var projectRoot = Directory.GetCurrentDirectory();
 var logPath = Path.Combine(projectRoot, "logs");
 
-Directory.CreateDirectory(logPath);  // ← Creates logs folder in project root
+Directory.CreateDirectory(logPath); 
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -38,17 +38,14 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// ==================== SERVICES ====================
 builder.Services.AddControllers();
 
-// FluentValidation – auto-discover all validators
 builder.Services.AddFluentValidation(fv =>
 {
     fv.RegisterValidatorsFromAssemblyContaining<Program>();
     fv.ImplicitlyValidateChildProperties = true;
 });
 
-// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -123,7 +120,6 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
-// ==================== GLOBAL EXCEPTION HANDLER – CLEAN JSON ERRORS ====================
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
@@ -173,7 +169,6 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-// ==================== PIPELINE ====================
 if (app.Environment.IsDevelopment() ||
     app.Environment.EnvironmentName.Equals("TestDevWeb", StringComparison.OrdinalIgnoreCase))
 {
@@ -199,7 +194,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// ===== AUTO RUN MIGRATIONS =====
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<OcufiiDbContext>();

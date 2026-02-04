@@ -22,7 +22,6 @@ public class NotificationController : ControllerBase
 
     private Guid CurrentUserId => User.GetUserId();
 
-    // 10.1 List Notifications
     [HttpGet]
     public async Task<ActionResult<ApiResponse>> List(
         [FromQuery] string? state,
@@ -46,7 +45,6 @@ public class NotificationController : ControllerBase
                 .ThenInclude(n => n.Device)
             .AsQueryable();
 
-        // Filters
         if (!string.IsNullOrEmpty(state) && Enum.TryParse<NotificationState>(state, true, out var parsedState))
             query = query.Where(nr => nr.Notification.State == parsedState);
 
@@ -68,7 +66,6 @@ public class NotificationController : ControllerBase
         else if (lastDays.HasValue && lastDays < 0)
             query = query.Where(nr => nr.Notification.EventTimestamp >= DateTime.UtcNow.AddDays(lastDays.Value));
 
-        // Ordering & Pagination (cursor-based)
         query = query.OrderByDescending(nr => nr.Notification.EventTimestamp);
 
         var rawItems = await query
@@ -95,7 +92,7 @@ public class NotificationController : ControllerBase
         batteryLevel = nr.Notification.BatteryLevel,
         signalStrength = nr.Notification.SignalStrength,
         signalQuality = nr.Notification.SignalQuality,
-        locationJson = nr.Notification.Location,  // ← Raw string
+        locationJson = nr.Notification.Location,
         eventTimestamp = nr.Notification.EventTimestamp
     })
     .ToListAsync();
@@ -132,7 +129,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.2 Get Notification Details
     [HttpGet("{notificationId:guid}")]
     public async Task<ActionResult<ApiResponse>> GetDetails(Guid notificationId)
     {
@@ -185,7 +181,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.3 Get Notification Actions
     [HttpGet("{notificationId:guid}/actions")]
     public async Task<ActionResult<ApiResponse>> GetActions(Guid notificationId)
     {
@@ -215,7 +210,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.4 Acknowledge
     [HttpPost("{notificationId:guid}/acknowledge")]
     public async Task<ActionResult<ApiResponse>> Acknowledge(Guid notificationId, [FromBody] AcknowledgeRequest request)
     {
@@ -252,7 +246,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.5 Resolve
     [HttpPost("{notificationId:guid}/resolve")]
     public async Task<ActionResult<ApiResponse>> Resolve(Guid notificationId, [FromBody] AcknowledgeRequest request)
     {
@@ -289,7 +282,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.6 Snooze Reasons
     [HttpGet("snooze-reasons")]
     public IActionResult GetSnoozeReasons()
     {
@@ -308,7 +300,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.7 Get Notification IDs by Device (Utility)
     [HttpGet("ids")]
     public async Task<ActionResult<ApiResponse>> GetIdsByDevice([FromQuery] Guid deviceId)
     {
@@ -326,7 +317,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.8 Unacknowledged
     [HttpGet("unacknowledged")]
     public async Task<ActionResult<ApiResponse>> GetUnacknowledged()
     {
@@ -351,7 +341,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.9 Batch Acknowledge
     [HttpPost("acknowledge/batch")]
     public async Task<ActionResult<ApiResponse>> BatchAcknowledge([FromBody] BatchActionRequest request)
     {
@@ -395,7 +384,6 @@ public class NotificationController : ControllerBase
         });
     }
 
-    // 10.10 Batch Resolve
     [HttpPost("resolve/batch")]
     public async Task<ActionResult<ApiResponse>> BatchResolve([FromBody] BatchActionRequest request)
     {
@@ -440,7 +428,6 @@ public class NotificationController : ControllerBase
     }
 }
 
-// DTOs
 public class AcknowledgeRequest
 {
     public string Comment { get; set; } = string.Empty;

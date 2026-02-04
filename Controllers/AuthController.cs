@@ -51,9 +51,9 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
-        var user = await _userRepo.Query()  // ← THIS RETURNS IQueryable
+        var user = await _userRepo.Query()
             .Where(u => u.Email == dto.Email && !u.IsDeleted)
-            .Include(u => u.Role)           // ← NOW WORKS
+            .Include(u => u.Role)
             .FirstOrDefaultAsync();
 
         if (user == null || _hasher.VerifyHashedPassword(user, user.Password, dto.Password)
@@ -65,6 +65,18 @@ public class AuthController : ControllerBase
         var (accessToken, refreshToken) = GenerateTokens(user);
         await SaveRefreshToken(user.UserId, refreshToken);
 
+        var userDeviceToken = await _db.DeviceToken
+        .Where(t => t.UserId == user.UserId)
+        .OrderByDescending(t => t.DeviceTokenId)
+        .Select(t => new
+        {
+            deviceTokenValue = t.DeviceTokenValue,
+            mobileDevice = t.MobileDevice,
+            mobileOsVersion = t.MobileOsVersion,
+            version = t.Version
+        })
+        .FirstOrDefaultAsync();
+
         Log.Information("User logged in: {Email}", user.Email);
 
         return Ok(new ApiResponse(true, "Login successful")
@@ -73,7 +85,8 @@ public class AuthController : ControllerBase
             {
                 access_token = accessToken,
                 refresh_token = refreshToken,
-                user = new { user.Email, user.FirstName, user.LastName, user.Company }
+                user = new { user.Email, user.FirstName, user.LastName, user.Company },
+                deviceToken = userDeviceToken
             }
         });
     }
@@ -87,38 +100,53 @@ public class AuthController : ControllerBase
 
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
-        // Find if this token is already used by ANY user
-        var existingToken = await _db.DeviceToken
+        var tokenByValue = await _db.DeviceToken
             .FirstOrDefaultAsync(t => t.DeviceTokenValue == request.DeviceTokenValue);
 
-        if (existingToken != null)
-        {
-            // Case 1: Token used by another user → reassign to current user
-            if (existingToken.UserId != userId)
-            {
-                existingToken.UserId = userId;
-                existingToken.MobileDevice = request.MobileDevice;
-                existingToken.MobileOsVersion = request.MobileOsVersion;
-                existingToken.Version = request.Version;
+        var existingForUser = await _db.DeviceToken
+            .FirstOrDefaultAsync(t => t.UserId == userId);
 
-                _db.DeviceToken.Update(existingToken);
+        if (tokenByValue != null)
+        {
+            if (tokenByValue.UserId == userId)
+            {
+
+                tokenByValue.MobileDevice = request.MobileDevice;
+                tokenByValue.MobileOsVersion = request.MobileOsVersion;
+                tokenByValue.Version = request.Version;
+
+                _db.DeviceToken.Update(tokenByValue);
+                await _db.SaveChangesAsync();
+
+                return Ok(new ApiResponse(true, "Device token updated for current user"));
+            }
+            else
+            {
+                tokenByValue.UserId = userId;
+                tokenByValue.MobileDevice = request.MobileDevice;
+                tokenByValue.MobileOsVersion = request.MobileOsVersion;
+                tokenByValue.Version = request.Version;
+
+                _db.DeviceToken.Update(tokenByValue);
                 await _db.SaveChangesAsync();
 
                 return Ok(new ApiResponse(true, "Device token reassigned to current user"));
             }
-
-            // Case 2: Token already belongs to current user → update
-            existingToken.MobileDevice = request.MobileDevice;
-            existingToken.MobileOsVersion = request.MobileOsVersion;
-            existingToken.Version = request.Version;
-
-            _db.DeviceToken.Update(existingToken);
-            await _db.SaveChangesAsync();
-
-            return Ok(new ApiResponse(true, "Device token updated"));
         }
 
-        // Case 3: New token → insert
+        if (existingForUser != null)
+        {
+            existingForUser.DeviceTokenValue = request.DeviceTokenValue;
+            existingForUser.MobileDevice = request.MobileDevice;
+            existingForUser.MobileOsVersion = request.MobileOsVersion;
+            existingForUser.Version = request.Version;
+
+            _db.DeviceToken.Update(existingForUser);
+            await _db.SaveChangesAsync();
+
+            return Ok(new ApiResponse(true, "User's existing token updated with new value"));
+        }
+
         var newToken = new DeviceToken
         {
             UserId = userId,
@@ -131,7 +159,7 @@ public class AuthController : ControllerBase
         _db.DeviceToken.Add(newToken);
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Device token registered"));
+        return Ok(new ApiResponse(true, "New device token registered"));
     }
 
     [HttpPost("register")]
@@ -225,11 +253,9 @@ public class AuthController : ControllerBase
         if (user == null)
             return Unauthorized(new ApiResponse(false, "User not found"));
 
-        // Revoke old token
         tokenRecord.Revoke();
         _refreshRepo.Update(tokenRecord);
 
-        // Issue new tokens
         var (newAccessToken, newRefreshToken) = GenerateTokens(user);
         await SaveRefreshToken(user.UserId, newRefreshToken);
 
@@ -349,7 +375,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    // Private Helpers
     private (string accessToken, string refreshToken) GenerateTokens(User user)
     {
         var claims = new[]

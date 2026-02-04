@@ -21,7 +21,6 @@ namespace OcufiiAPI.Controllers
             _roleRepo = roleRepo;
         }
 
-        // GET /api/users/{id}
         [Authorize]
         [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetById(Guid id)
@@ -52,7 +51,6 @@ namespace OcufiiAPI.Controllers
             });
         }
 
-        // GET /api/users
         [HttpGet]
         [Authorize(Roles = "admin")]
         public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
@@ -73,7 +71,6 @@ namespace OcufiiAPI.Controllers
             });
         }
 
-        // PATCH /api/users/{id}
         [HttpPatch("{id:guid}")]
         [Authorize(Policy = "CanEditOwnProfile")]
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProfileDto dto)
@@ -93,7 +90,6 @@ namespace OcufiiAPI.Controllers
             return Ok(new ApiResponse(true, "User updated"));
         }
 
-        // PATCH /api/users/{id}/status
         [HttpPatch("{id:guid}/status")]
         [Authorize(Roles = "admin")]
         public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateUserStatusDto dto)
@@ -109,7 +105,6 @@ namespace OcufiiAPI.Controllers
             return Ok(new ApiResponse(true, "Status updated"));
         }
 
-        // PATCH /api/users/me
         [HttpPatch("me")]
         [Authorize(Policy = "CanEditOwnProfile")]
         public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileDto dto)
@@ -130,7 +125,6 @@ namespace OcufiiAPI.Controllers
             return Ok(new ApiResponse(true, "Profile updated"));
         }
 
-        // DELETE /api/users/{id}
         [HttpDelete("{id:guid}")]
         [Authorize(Policy = "CanEditOwnProfile")]
         public async Task<IActionResult> Delete(Guid id)
