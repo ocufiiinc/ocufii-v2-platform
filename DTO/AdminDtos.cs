@@ -21,12 +21,12 @@ namespace OcufiiAPI.DTO
 
     public class CreateDependentRequest : CreateUserRequest
     {
-        public string Email { get; set; } = string.Empty;
-        public string FirstName { get; set; } = string.Empty;
-        public string LastName { get; set; } = string.Empty;
-        public string? PhoneNumber { get; set; }
-        public string? Company { get; set; }
-        public string? Role { get; set; } = "user";
+        public new string Email { get; set; } = string.Empty;
+        public new string FirstName { get; set; } = string.Empty;
+        public new string LastName { get; set; } = string.Empty;
+        public new string? PhoneNumber { get; set; }
+        public new string? Company { get; set; }
+        public new string? Role { get; set; } = "user";
         public List<AssignFeatureRequest>? Features { get; set; }  
     }
 
