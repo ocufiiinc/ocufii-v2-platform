@@ -339,7 +339,8 @@ public class DevicesController : ControllerBase
                 var payload = new
                 {
                     msg_id = 1001,
-                    device_info = new { device_id = deviceId, mac = gatewayMac }
+                    device_info = new { device_id = deviceId, mac = gatewayMac },
+                    data = new { reset_state = 1 }
                 };
 
                 var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions

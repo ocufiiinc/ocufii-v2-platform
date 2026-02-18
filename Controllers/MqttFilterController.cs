@@ -8,6 +8,7 @@ using OcufiiAPI.Configs;
 using OcufiiAPI.Data;
 using OcufiiAPI.Extensions;
 using OcufiiAPI.Models;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 
@@ -214,7 +215,7 @@ namespace OcufiiAPI.Controllers
             var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
 
             var steps = new List<object>();
-            var receivedMessages = new List<object>();
+            var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
             IMqttClient? mqttClient = null;
             
             const int maxFlowRetries = 2;
@@ -224,7 +225,7 @@ namespace OcufiiAPI.Controllers
                 for (int flowAttempt = 1; flowAttempt <= maxFlowRetries; flowAttempt++)
                 {
                     steps = new List<object>();
-                    receivedMessages = new List<object>();
+                    receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
                     
                     try
                     {
@@ -241,18 +242,13 @@ namespace OcufiiAPI.Controllers
                             {
                                 var json = JsonSerializer.Deserialize<JsonDocument>(payload);
                                 var msgId = json?.RootElement.GetProperty("msg_id").GetInt32();
-
-                                receivedMessages.Add(new
-                                {
-                                    topic,
-                                    msgId,
-                                    payload,
-                                    timestamp = DateTime.UtcNow
-                                });
+                                receivedMessages.Add((msgId, payload, DateTime.UtcNow));
+                                _logger.LogInformation($"Gateway {gatewayMac}: Received msg_id={msgId} on topic {topic}");
                             }
                             catch
                             {
-                                receivedMessages.Add(new { topic, payload, error = "Failed to parse msg_id" });
+                                receivedMessages.Add((null, payload, DateTime.UtcNow));
+                                _logger.LogWarning($"Gateway {gatewayMac}: Failed to parse msg_id from: {payload}");
                             }
 
                             return Task.CompletedTask;
@@ -307,13 +303,9 @@ namespace OcufiiAPI.Controllers
                                 var timeout = TimeSpan.FromSeconds(timeoutSeconds);
                                 while ((DateTime.UtcNow - startTime) < timeout)
                                 {
-                                    var ack = receivedMessages.FirstOrDefault(m =>
-                                    {
-                                        var msgIdProp = m.GetType().GetProperty("msgId");
-                                        return msgIdProp != null && (int?)msgIdProp.GetValue(m) == msgId;
-                                    });
+                                    var ack = receivedMessages.FirstOrDefault(m => m.msgId == msgId);
 
-                                    if (ack != null)
+                                    if (ack.msgId == msgId)
                                     {
                                         return new
                                         {
@@ -326,7 +318,7 @@ namespace OcufiiAPI.Controllers
                                             totalAttempts = maxRetries,
                                             topic = publishTopic,
                                             payload = json,
-                                            response = ack,
+                                            response = new { ack.msgId, ack.payload, ack.timestamp },
                                             message = $"msg_id={msgId} published and acknowledged on attempt {attempt}/{maxRetries}"
                                         };
                                     }
@@ -560,7 +552,7 @@ namespace OcufiiAPI.Controllers
             var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
 
             var steps = new List<object>();
-            var receivedMessages = new List<object>();
+            var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
             IMqttClient? mqttClient = null;
             
             const int maxFlowRetries = 2;
@@ -570,7 +562,7 @@ namespace OcufiiAPI.Controllers
                 for (int flowAttempt = 1; flowAttempt <= maxFlowRetries; flowAttempt++)
                 {
                     steps = new List<object>();
-                    receivedMessages = new List<object>();
+                    receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
                     
                     try
                     {
@@ -587,18 +579,13 @@ namespace OcufiiAPI.Controllers
                             {
                                 var json = JsonSerializer.Deserialize<JsonDocument>(payload);
                                 var msgId = json?.RootElement.GetProperty("msg_id").GetInt32();
-
-                                receivedMessages.Add(new
-                                {
-                                    topic,
-                                    msgId,
-                                    payload,
-                                    timestamp = DateTime.UtcNow
-                                });
+                                receivedMessages.Add((msgId, payload, DateTime.UtcNow));
+                                _logger.LogInformation($"Beacon flow: Received msg_id={msgId} on topic {topic}");
                             }
                             catch
                             {
-                                receivedMessages.Add(new { topic, payload, error = "Failed to parse msg_id" });
+                                receivedMessages.Add((null, payload, DateTime.UtcNow));
+                                _logger.LogWarning($"Beacon flow: Failed to parse msg_id from: {payload}");
                             }
 
                             return Task.CompletedTask;
@@ -652,13 +639,9 @@ namespace OcufiiAPI.Controllers
                                 var timeout = TimeSpan.FromSeconds(timeoutSeconds);
                                 while ((DateTime.UtcNow - startTime) < timeout)
                                 {
-                                    var ack = receivedMessages.FirstOrDefault(m =>
-                                    {
-                                        var msgIdProp = m.GetType().GetProperty("msgId");
-                                        return msgIdProp != null && (int?)msgIdProp.GetValue(m) == msgId;
-                                    });
+                                    var ack = receivedMessages.FirstOrDefault(m => m.msgId == msgId);
 
-                                    if (ack != null)
+                                    if (ack.msgId == msgId)
                                     {
                                         return new
                                         {
@@ -671,7 +654,7 @@ namespace OcufiiAPI.Controllers
                                             totalAttempts = maxRetries,
                                             topic = publishTopic,
                                             payload = json,
-                                            response = ack,
+                                            response = new { ack.msgId, ack.payload, ack.timestamp },
                                             message = $"msg_id={msgId} published and acknowledged on attempt {attempt}/{maxRetries}"
                                         };
                                     }
