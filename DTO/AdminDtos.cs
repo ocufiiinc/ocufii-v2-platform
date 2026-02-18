@@ -5,6 +5,7 @@ namespace OcufiiAPI.DTO
     public class CreateTenantRequest
     {
         public string? ThemeConfig { get; set; }
+        public Guid? AssignedResellerId { get; set; }
         public string? CustomWorkflows { get; set; }
     }
 
@@ -15,7 +16,8 @@ namespace OcufiiAPI.DTO
         public string LastName { get; set; } = string.Empty;
         public string? PhoneNumber { get; set; }
         public string? Company { get; set; }
-        public string Role { get; set; } = "user"; 
+        public string Role { get; set; } = "user";
+        public Guid? AssignedResellerId { get; set; }
         public Guid? TenantId { get; set; } 
     }
 
@@ -41,5 +43,18 @@ namespace OcufiiAPI.DTO
     {
         public bool IsEnabled { get; set; }
         public FeatureRight Right { get; set; }
+    }
+
+    public class MoveTenantRequest
+    {
+        public Guid NewResellerId { get; set; }
+    }
+
+    public class CreateResellerRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? ContactName { get; set; }
+        public string? PhoneNumber { get; set; }
     }
 }

@@ -37,6 +37,7 @@ public class AuthController : ControllerBase
     private readonly JwtConfig _jwt;
     private readonly LegacyConfig _legacy;
     private readonly PasswordHasher<User> _hasher = new();
+    private readonly PasswordHasher<PlatformAdmin> _platformHasher = new();
 
     public AuthController(
         IRepository<User> userRepo,
@@ -53,25 +54,7 @@ public class AuthController : ControllerBase
         _jwt = jwtOptions.Value;
         _legacy = legacyOptions.Value;
     }
-
-    /// <summary>
-    /// Authenticate user and return JWT access token + refresh token
-    /// </summary>
-    /// <remarks>
-    /// On success, returns:
-    /// - access_token (JWT for authenticated requests)
-    /// - refresh_token (for obtaining new access tokens)
-    /// - user basic info
-    /// - deviceToken (latest stored Firebase token for this user, if any)
-    ///
-    /// Client should compare the returned deviceTokenValue with current FCM token.
-    /// If different, call POST /api/auth/device-token to update.
-    /// </remarks>
-    /// <param name="dto">Login credentials and optional device token</param>
-    /// <response code="200">Login successful</response>
-    /// <response code="400">Invalid request body or validation failed</response>
-    /// <response code="401">Invalid email or password</response>
-    /// <response code="500">Internal server error (no details exposed)</response>
+    
     [HttpPost("login")]
     [AllowAnonymous]
     [SwaggerOperation(
@@ -126,18 +109,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Register or update Firebase device token for authenticated user
-    /// </summary>
-    /// <remarks>
-    /// - If token already exists for another user → reassigns to current user
-    /// - If token exists for current user → updates metadata
-    /// - If new token → creates new record
-    /// </remarks>
-    /// <param name="request">Device token details</param>
-    /// <response code="200">Token registered or updated</response>
-    /// <response code="400">DeviceTokenValue is required</response>
-    /// <response code="401">Unauthorized</response>
     [HttpPost("device-token")]
     [SwaggerOperation(
         Summary = "Register/Update Firebase Device Token",
@@ -181,18 +152,6 @@ public class AuthController : ControllerBase
         return Ok(new ApiResponse(true, "Device token registered/updated"));
     }
 
-    /// <summary>
-    /// Register a new user
-    /// </summary>
-    /// <remarks>
-    /// Creates a new user account with default role (viewer).
-    /// Email must be unique.
-    /// </remarks>
-    /// <param name="dto">Registration details</param>
-    /// <param name="idempotencyKey">Optional idempotency key to prevent duplicate registrations</param>
-    /// <response code="201">User registered successfully</response>
-    /// <response code="400">Validation failed</response>
-    /// <response code="409">Email already in use</response>
     [HttpPost("register")]
     [AllowAnonymous]
     [SwaggerOperation(Summary = "User Registration", Description = "Creates a new user account")]
@@ -226,6 +185,20 @@ public class AuthController : ControllerBase
         if (role == null)
             return StatusCode(500, new ApiResponse(false, "Default role not found"));
 
+        var assignedResellerId = dto.AssignedResellerId ?? new Guid("00000000-0000-0000-0000-000000000001");
+
+        var newTenant = new Tenant
+        {
+            ResellerId = Guid.NewGuid(), 
+            AssignedResellerId = assignedResellerId,  
+            DateCreated = DateTime.UtcNow,
+            DateUpdated = DateTime.UtcNow,
+            ThemeConfig = "{}",
+            CustomWorkflows = "[]"
+        };
+        _db.Tenants.Add(newTenant);
+        await _db.SaveChangesAsync();
+
         var user = new User
         {
             UserId = Guid.NewGuid(),
@@ -237,7 +210,7 @@ public class AuthController : ControllerBase
             Username = dto.UserName ?? dto.Email.Split('@')[0],
             Password = _hasher.HashPassword(null!, dto.Password),
             RoleId = role.RoleId,
-            TenantId = Guid.Parse(_legacy.FixedTenantId),
+            TenantId = newTenant.ResellerId,
             AccountHold = dto.AccountHold,
             DateSubmitted = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
@@ -265,16 +238,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Refresh access token using refresh token
-    /// </summary>
-    /// <remarks>
-    /// Revokes old refresh token and issues new access + refresh tokens.
-    /// </remarks>
-    /// <param name="dto">Refresh token</param>
-    /// <response code="200">Tokens refreshed</response>
-    /// <response code="400">Invalid request</response>
-    /// <response code="401">Invalid or expired refresh token</response>
     [HttpPost("refresh")]
     [Authorize]
     [SwaggerOperation(Summary = "Refresh Access Token")]
@@ -314,11 +277,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Logout user by revoking refresh token
-    /// </summary>
-    /// <param name="dto">Refresh token to revoke</param>
-    /// <response code="200">Logged out</response>
     [HttpPost("logout")]
     [Authorize]
     [SwaggerOperation(Summary = "User Logout")]
@@ -341,11 +299,6 @@ public class AuthController : ControllerBase
         return Ok(new ApiResponse(true, "Logged out successfully"));
     }
 
-    /// <summary>
-    /// Get current user's profile
-    /// </summary>
-    /// <response code="200">Profile retrieved</response>
-    /// <response code="401">Unauthorized</response>
     [HttpGet("me")]
     [Authorize]
     [SwaggerOperation(Summary = "Get Current User Profile")]
@@ -377,11 +330,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Change current user's password
-    /// </summary>
-    /// <response code="200">Password changed</response>
-    /// <response code="400">Invalid current password or validation failed</response>
     [HttpPut("change-password")]
     [Authorize]
     [SwaggerOperation(Summary = "Change Password")]
@@ -404,12 +352,6 @@ public class AuthController : ControllerBase
         return Ok(new ApiResponse(true, "Password changed successfully"));
     }
 
-    /// <summary>
-    /// Change current user's email
-    /// </summary>
-    /// <response code="200">Email changed</response>
-    /// <response code="400">Invalid request</response>
-    /// <response code="409">Email already in use</response>
     [HttpPut("change-email")]
     [Authorize]
     [SwaggerOperation(Summary = "Change Email")]
@@ -437,6 +379,61 @@ public class AuthController : ControllerBase
         await _userRepo.SaveAsync();
 
         return Ok(new ApiResponse(true, "Email changed successfully"));
+    }
+
+    [HttpPost("platform-login")]
+    [AllowAnonymous]
+    [SwaggerOperation(Summary = "Platform Admin Login", Description = "Authenticates Ocufii Super Admin. Separate from regular user login.")]
+    [SwaggerResponse(200, "Login successful", typeof(ApiResponse))]
+    [SwaggerResponse(401, "Invalid email or password")]
+    public async Task<IActionResult> PlatformLogin([FromBody] PlatformLoginDto dto)
+    {
+        var admin = await _db.PlatformAdmins
+        .FirstOrDefaultAsync(a => a.Email == dto.Email);
+
+        if (admin == null || _platformHasher.VerifyHashedPassword(admin, admin.PasswordHash, dto.Password) == PasswordVerificationResult.Failed)
+            return Unauthorized(new ApiResponse(false, "Invalid email or password"));
+
+        var claims = new[]
+        {
+        new Claim(ClaimTypes.Email, admin.Email),
+        new Claim(ClaimTypes.NameIdentifier, admin.AdminId.ToString()),
+        new Claim(ClaimTypes.Name, $"{admin.FirstName} {admin.LastName}".Trim()),
+        new Claim(ClaimTypes.Role, "super_admin")
+    };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _jwt.Issuer,
+            audience: _jwt.Audience,
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(_jwt.AccessTokenMinutes),
+            signingCredentials: creds);
+
+        var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+
+        admin.LastLogin = DateTime.UtcNow;
+        _db.PlatformAdmins.Update(admin);
+        await _db.SaveChangesAsync();
+
+        Log.Information("Platform admin logged in: {Email}", admin.Email);
+
+        return Ok(new ApiResponse(true, "Platform login successful")
+        {
+            Data = new
+            {
+                access_token = accessToken,
+                admin = new
+                {
+                    admin.AdminId,
+                    admin.Email,
+                    admin.FirstName,
+                    admin.LastName
+                }
+            }
+        });
     }
 
     // Private Helpers
@@ -479,23 +476,4 @@ public class AuthController : ControllerBase
         await _refreshRepo.AddAsync(rt);
         await _refreshRepo.SaveAsync();
     }
-}
-
-// DTOs
-public class LoginDto
-{
-    public string Email { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
-    public string? DeviceTokenValue { get; set; }
-    public string? MobileDevice { get; set; }
-    public string? MobileOsVersion { get; set; }
-    public string? Version { get; set; }
-}
-
-public class DeviceTokenRequest
-{
-    public string DeviceTokenValue { get; set; } = string.Empty;
-    public string? MobileDevice { get; set; }
-    public string? MobileOsVersion { get; set; }
-    public string? Version { get; set; }
 }

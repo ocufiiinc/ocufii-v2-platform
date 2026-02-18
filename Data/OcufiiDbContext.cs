@@ -26,6 +26,8 @@ namespace OcufiiAPI.Data
         public DbSet<SnoozeReason> SnoozeReasons { get; set; } = null!;
 
         public DbSet<DeviceToken> DeviceToken { get; set; } = null!;
+        public DbSet<PlatformAdmin> PlatformAdmins { get; set; } = null!;
+        public DbSet<Reseller> Resellers { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -298,6 +300,8 @@ namespace OcufiiAPI.Data
                 entity.Property(e => e.CustomWorkflows).HasColumnType("jsonb");
                 entity.Property(e => e.DateCreated).HasDefaultValueSql("now()");
                 entity.Property(e => e.DateUpdated).HasDefaultValueSql("now()");
+                entity.Property(e => e.AssignedResellerId)
+                .IsRequired(false);
             });
 
             modelBuilder.Entity<Feature>(entity =>
@@ -346,6 +350,33 @@ namespace OcufiiAPI.Data
                       .WithMany(t => t.Users)
                       .HasForeignKey(u => u.TenantId)
                       .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<PlatformAdmin>(entity =>
+            {
+                entity.ToTable("PlatformAdmins");
+                entity.HasKey(e => e.AdminId);
+                entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
+                entity.HasIndex(e => e.Email).IsUnique();
+                entity.Property(e => e.PasswordHash).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            });
+
+            modelBuilder.Entity<Reseller>(entity =>
+            {
+                entity.ToTable("Resellers");
+                entity.HasKey(e => e.ResellerId);
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+                entity.Property(e => e.Email).HasMaxLength(255);
+                entity.HasIndex(e => e.Email).IsUnique();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.IsActive).HasDefaultValue(true);
+                entity.HasOne<PlatformAdmin>()
+                      .WithMany()
+                      .HasForeignKey(e => e.CreatedByAdminId)
+                      .OnDelete(DeleteBehavior.Restrict);
             });
 
             var dateTimeProperties = modelBuilder.Model.GetEntityTypes()

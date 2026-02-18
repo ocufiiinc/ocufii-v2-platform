@@ -20,6 +20,9 @@ namespace OcufiiAPI.Models
         [Column(TypeName = "jsonb")]
         public string CustomWorkflows { get; set; } = "{}";
 
+        public Guid? AssignedResellerId { get; set; } = new Guid("00000000-0000-0000-0000-000000000001");
+        public Reseller AssignedReseller { get; set; } = null!;
+
         // Navigation
         public ICollection<User> Users { get; set; } = new List<User>();
         public ICollection<FeatureFlag> FeatureFlags { get; set; } = new List<FeatureFlag>();

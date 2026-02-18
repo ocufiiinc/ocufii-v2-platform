@@ -31,15 +31,6 @@ public class AdminController : ControllerBase
         _db = db;
     }
 
-    /// <summary>
-    /// List all tenants with user and admin counts (Super Admin only)
-    /// </summary>
-    /// <remarks>
-    /// Returns all tenants including basic user stats. Restricted to super_admin role.
-    /// </remarks>
-    /// <response code="200">Tenants retrieved successfully</response>
-    /// <response code="401">Unauthorized - not authenticated</response>
-    /// <response code="403">Forbidden - not super_admin</response>
     [HttpGet("tenants")]
     [Authorize(Roles = "super_admin")]
     [SwaggerOperation(Summary = "List All Tenants", Description = "Retrieves all tenants with user and admin counts. Super admin only.")]
@@ -51,7 +42,8 @@ public class AdminController : ControllerBase
                 .ThenInclude(u => u.Role)
             .Select(t => new
             {
-                t.ResellerId,
+                t.ResellerId,                // Existing PK
+                t.AssignedResellerId,        // NEW: shows commercial Reseller
                 t.DateCreated,
                 t.DateUpdated,
                 t.ThemeConfig,
@@ -80,29 +72,21 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Create a new tenant (Super Admin only)
-    /// </summary>
-    /// <remarks>
-    /// Creates a new tenant record. Restricted to super_admin role.
-    /// </remarks>
-    /// <param name="request">Tenant creation details</param>
-    /// <response code="201">Tenant created successfully</response>
-    /// <response code="400">Invalid request data</response>
-    /// <response code="401">Unauthorized</response>
-    /// <response code="403">Forbidden - not super_admin</response>
     [HttpPost("tenants")]
     [Authorize(Roles = "super_admin")]
-    [SwaggerOperation(Summary = "Create New Tenant", Description = "Creates a new tenant. Super admin only.")]
+    [SwaggerOperation(Summary = "Create New Tenant", Description = "Creates a new tenant. Super admin only. AssignedResellerId defaults to Ocufii Direct if not provided.")]
     [SwaggerResponse(201, "Tenant created", typeof(ApiResponse))]
     public async Task<ActionResult<ApiResponse>> CreateTenant([FromBody] CreateTenantRequest request)
     {
         if (request == null)
             return BadRequest(new ApiResponse(false, "Invalid request body"));
 
+        var defaultResellerId = new Guid("00000000-0000-0000-0000-000000000001");
+
         var tenant = new Tenant
         {
-            ResellerId = Guid.NewGuid(),
+            ResellerId = Guid.NewGuid(),                    // PK
+            AssignedResellerId = request.AssignedResellerId ?? defaultResellerId,  // NEW: commercial attribution
             DateCreated = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
             ThemeConfig = request.ThemeConfig ?? "{}",
@@ -114,18 +98,10 @@ public class AdminController : ControllerBase
 
         return Created($"/admin/tenants/{tenant.ResellerId}", new ApiResponse(true, "Tenant created successfully")
         {
-            Data = new { tenant.ResellerId, tenant.DateCreated }
+            Data = new { tenant.ResellerId, tenant.AssignedResellerId, tenant.DateCreated }
         });
     }
 
-    /// <summary>
-    /// List users (Super Admin sees all, Tenant Admin sees only their tenant)
-    /// </summary>
-    /// <remarks>
-    /// Returns user list filtered by tenant for tenant admins. Super admins see everything.
-    /// </remarks>
-    /// <response code="200">Users retrieved successfully</response>
-    /// <response code="401">Unauthorized</response>
     [HttpGet("users")]
     [SwaggerOperation(Summary = "List Users", Description = "Lists users - full access for super admin, tenant-scoped for tenant admin")]
     [SwaggerResponse(200, "Users retrieved", typeof(ApiResponse))]
@@ -167,17 +143,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Create a new user (Super Admin or Tenant Admin)
-    /// </summary>
-    /// <remarks>
-    /// Creates a user in the current tenant (or any tenant for super admin).
-    /// </remarks>
-    /// <param name="request">User creation details</param>
-    /// <response code="201">User created</response>
-    /// <response code="400">Invalid request</response>
-    /// <response code="401">Unauthorized</response>
-    /// <response code="403">Forbidden</response>
     [HttpPost("users")]
     [SwaggerOperation(Summary = "Create User", Description = "Creates a new user in the tenant")]
     [SwaggerResponse(201, "User created", typeof(ApiResponse))]
@@ -193,15 +158,25 @@ public class AdminController : ControllerBase
         var isSuperAdmin = User.IsInRole("super_admin");
 
         Guid tenantId;
+        Guid? assignedResellerId;
+
         if (isSuperAdmin)
         {
             if (request.TenantId == null)
                 return BadRequest(new ApiResponse(false, "TenantId required for super admin"));
+
             tenantId = request.TenantId.Value;
+
+            var chosenTenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId);
+            if (chosenTenant == null)
+                return NotFound(new ApiResponse(false, "Tenant not found"));
+
+            assignedResellerId = request.AssignedResellerId ?? chosenTenant.AssignedResellerId;
         }
         else
         {
             tenantId = currentUser.TenantId!.Value;
+            assignedResellerId = currentUser.Tenant!.AssignedResellerId;  // inherit from tenant
         }
 
         var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == request.Role);
@@ -235,15 +210,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Create a dependent user (Super Admin or Tenant Admin)
-    /// </summary>
-    /// <remarks>
-    /// Creates a dependent user linked to a parent user.
-    /// </remarks>
-    /// <param name="request">Dependent user details</param>
-    /// <response code="201">Dependent created</response>
-    /// <response code="400">Invalid request</response>
     [HttpPost("users/{id:guid}/dependents")]
     [SwaggerOperation(Summary = "Create Dependent User", Description = "Creates a dependent user for the specified parent")]
     [SwaggerResponse(201, "Dependent created")]
@@ -270,7 +236,7 @@ public class AdminController : ControllerBase
             Username = request.Email.Split('@')[0],
             Password = _hasher.HashPassword(null!, "TempPass@2025!"),
             RoleId = userRole.RoleId,
-            TenantId = parent.TenantId,
+            TenantId = parent.TenantId,  // inherit from parent (same Tenant)
             ParentId = parent.UserId,
             IsEnabled = true,
             IsDeleted = false,
@@ -287,12 +253,7 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Get features assigned to a user
-    /// </summary>
-    /// <param name="id">User ID</param>
-    /// <response code="200">Features retrieved</response>
-    /// <response code="404">User not found</response>
+
     [HttpGet("users/{id:guid}/features")]
     [SwaggerOperation(Summary = "Get User Features", Description = "Returns all features assigned to the user")]
     [SwaggerResponse(200, "Features retrieved")]
@@ -301,7 +262,7 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users
             .Include(u => u.UserFeatures)
-            .ThenInclude(uf => uf.Feature)
+                .ThenInclude(uf => uf.Feature)
             .FirstOrDefaultAsync(u => u.UserId == id);
 
         if (user == null)
@@ -327,11 +288,10 @@ public class AdminController : ControllerBase
     public async Task<ActionResult<ApiResponse>> ListFeatures()
     {
         var features = await _db.Features.ToListAsync();
-
         return Ok(new ApiResponse(true, "Features retrieved successfully")
         {
             Data = features.Select(f => new
-        {
+            {
                 f.Id,
                 f.Key,
                 f.Name,
@@ -341,14 +301,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Assign a feature to a user
-    /// </summary>
-    /// <param name="id">User ID</param>
-    /// <param name="request">Feature assignment details</param>
-    /// <response code="200">Feature assigned</response>
-    /// <response code="400">Invalid request</response>
-    /// <response code="404">User or feature not found</response>
     [HttpPost("users/{id:guid}/features")]
     [SwaggerOperation(Summary = "Assign Feature to User", Description = "Assigns a feature to a user with enabled/right settings")]
     [SwaggerResponse(200, "Feature assigned")]
@@ -392,14 +344,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Update a feature assignment for a user
-    /// </summary>
-    /// <param name="id">User ID</param>
-    /// <param name="featureId">Feature ID</param>
-    /// <param name="request">Update details</param>
-    /// <response code="200">Feature updated</response>
-    /// <response code="404">User feature not found</response>
     [HttpPatch("users/{id:guid}/features/{featureId:guid}")]
     [SwaggerOperation(Summary = "Update User Feature", Description = "Updates enabled/right settings for a feature assigned to user")]
     [SwaggerResponse(200, "Feature updated")]
@@ -428,13 +372,6 @@ public class AdminController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Remove a feature assignment from a user
-    /// </summary>
-    /// <param name="id">User ID</param>
-    /// <param name="featureId">Feature ID</param>
-    /// <response code="200">Feature removed</response>
-    /// <response code="404">User feature not found</response>
     [HttpDelete("users/{id:guid}/features/{featureId:guid}")]
     [SwaggerOperation(Summary = "Remove User Feature", Description = "Removes a feature assignment from the user")]
     [SwaggerResponse(200, "Feature removed")]
@@ -450,9 +387,107 @@ public class AdminController : ControllerBase
 
         return Ok(new ApiResponse(true, "Feature removed successfully"));
     }
-}
 
-public class CreateDependentRequest : CreateUserRequest
-{
-    public List<AssignFeatureRequest>? Features { get; set; }
+    [HttpPost("resellers")]
+    [Authorize(Roles = "super_admin")]
+    [SwaggerOperation(Summary = "Create Reseller", Description = "Creates a new Reseller account. Super admin only.")]
+    [SwaggerResponse(201, "Reseller created")]
+    [SwaggerResponse(400, "Invalid request")]
+    [SwaggerResponse(409, "Email already in use")]
+    public async Task<ActionResult<ApiResponse>> CreateReseller([FromBody] CreateResellerRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new ApiResponse(false, "Name and Email are required"));
+
+        var existing = await _db.Resellers.AnyAsync(r => r.Email == request.Email);
+        if (existing)
+            return Conflict(new ApiResponse(false, "Email already in use"));
+
+        var tempPassword = Guid.NewGuid().ToString("N").Substring(0, 12);
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
+
+        var reseller = new Reseller
+        {
+            ResellerId = Guid.NewGuid(),
+            Name = request.Name,
+            Email = request.Email,
+            ContactName = request.ContactName,
+            PhoneNumber = request.PhoneNumber,
+            CreatedByAdminId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        _db.Resellers.Add(reseller);
+        await _db.SaveChangesAsync();
+
+        // TODO: Send email with tempPassword (implement your email service)
+        // e.g. await _emailService.SendResellerWelcome(reseller.Email, tempPassword);
+
+        return Created($"/admin/resellers/{reseller.ResellerId}", new ApiResponse(true, "Reseller created")
+        {
+            Data = new
+            {
+                reseller.ResellerId,
+                reseller.Name,
+                reseller.Email,
+                TemporaryPassword = tempPassword  // Remove in production
+            }
+        });
+    }
+
+    [HttpGet("resellers")]
+    [Authorize(Roles = "super_admin")]
+    [SwaggerOperation(Summary = "List Resellers", Description = "Returns all Resellers with basic info and tenant count.")]
+    [SwaggerResponse(200, "Resellers retrieved")]
+    public async Task<ActionResult<ApiResponse>> ListResellers()
+    {
+        var resellers = await _db.Resellers
+            .Select(r => new
+            {
+                r.ResellerId,
+                r.Name,
+                r.Email,
+                r.ContactName,
+                r.PhoneNumber,
+                r.IsActive,
+                r.CreatedAt,
+                tenantCount = _db.Tenants.Count(t => t.AssignedResellerId == r.ResellerId)
+            })
+            .ToListAsync();
+
+        return Ok(new ApiResponse(true, "Resellers retrieved")
+        {
+            Data = resellers
+        });
+    }
+
+    [HttpPatch("tenants/{tenantId:guid}/reseller")]
+    [Authorize(Roles = "super_admin")]
+    [SwaggerOperation(Summary = "Move Tenant to Reseller", Description = "Reassigns a Tenant to a different Reseller.")]
+    [SwaggerResponse(200, "Tenant reassigned")]
+    [SwaggerResponse(404, "Tenant or Reseller not found")]
+    public async Task<ActionResult<ApiResponse>> MoveTenantToReseller(Guid tenantId, [FromBody] MoveTenantRequest request)
+    {
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId);
+        if (tenant == null)
+            return NotFound(new ApiResponse(false, "Tenant not found"));
+
+        var newReseller = await _db.Resellers.FirstOrDefaultAsync(r => r.ResellerId == request.NewResellerId);
+        if (newReseller == null)
+            return NotFound(new ApiResponse(false, "New Reseller not found"));
+
+        tenant.AssignedResellerId = request.NewResellerId;
+        tenant.DateUpdated = DateTime.UtcNow;
+
+        _db.Tenants.Update(tenant);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Tenant reassigned successfully")
+        {
+            Data = new { tenant.ResellerId, newResellerId = request.NewResellerId }
+        });
+    }
+
 }
