@@ -301,7 +301,7 @@ namespace OcufiiAPI.Data
                 entity.Property(e => e.DateCreated).HasDefaultValueSql("now()");
                 entity.Property(e => e.DateUpdated).HasDefaultValueSql("now()");
                 entity.Property(e => e.AssignedResellerId)
-                .IsRequired(false);
+                .IsRequired();
             });
 
             modelBuilder.Entity<Feature>(entity =>
