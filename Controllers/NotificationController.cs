@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
 using OcufiiAPI.Models;
 using OcufiiAPI.Extensions;
+using Swashbuckle.AspNetCore.Annotations;
 using System.Text.Json;
 
 namespace OcufiiAPI.Controllers;
@@ -11,6 +12,12 @@ namespace OcufiiAPI.Controllers;
 [ApiController]
 [Route("notifications")]
 [Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiResponse), 200)]
+[ProducesResponseType(typeof(ApiResponse), 400)]
+[ProducesResponseType(typeof(ApiResponse), 401)]
+[ProducesResponseType(typeof(ApiResponse), 403)]
+[ProducesResponseType(typeof(ApiResponse), 404)]
 public class NotificationController : ControllerBase
 {
     private readonly OcufiiDbContext _db;
@@ -23,6 +30,12 @@ public class NotificationController : ControllerBase
     private Guid CurrentUserId => User.GetUserId();
 
     [HttpGet]
+    [SwaggerOperation(
+        Summary = "List Notifications",
+        Description = "Returns paginated list of notifications for the current user with optional filters by state, category, type, device, time, etc."
+    )]
+    [SwaggerResponse(200, "Notifications retrieved successfully", typeof(ApiResponse))]
+    [SwaggerResponse(401, "Unauthorized - missing or invalid token")]
     public async Task<ActionResult<ApiResponse>> List(
         [FromQuery] string? state,
         [FromQuery] string? categoryKey,
@@ -70,32 +83,32 @@ public class NotificationController : ControllerBase
 
         var rawItems = await query
     .Take(limit)
-    .OrderByDescending(nr => nr.Notification.EventTimestamp)
-    .Select(nr => new
-    {
-        notificationId = nr.Notification.Id,
-        categoryKey = nr.Notification.Category.Key,
-        typeKey = nr.Notification.TypeKey ??
-                  (nr.Notification.Type == null ? null : nr.Notification.Type.Key),
-        priority = nr.Notification.Priority.ToString().ToLower(),
-        state = nr.Notification.State.ToString().ToLower(),
-        title = nr.Notification.Title,
-        body = nr.Notification.Body,
-        sound = nr.Notification.Sound,
-        contentAvailable = nr.Notification.ContentAvailable,
-        ownerUserId = nr.Notification.OwnerUserId,
-        initiatorUserId = nr.Notification.InitiatorUserId,
-        initiatorDeviceId = nr.Notification.InitiatorDeviceId,
-        deviceId = nr.Notification.DeviceId,
-        viaDeviceId = nr.Notification.ViaDeviceId,
-        telemetryId = nr.Notification.TelemetryId,
-        batteryLevel = nr.Notification.BatteryLevel,
-        signalStrength = nr.Notification.SignalStrength,
-        signalQuality = nr.Notification.SignalQuality,
+            .OrderByDescending(nr => nr.Notification.EventTimestamp)
+            .Select(nr => new
+            {
+                notificationId = nr.Notification.Id,
+                categoryKey = nr.Notification.Category.Key,
+                typeKey = nr.Notification.TypeKey ??
+                          (nr.Notification.Type == null ? null : nr.Notification.Type.Key),
+                priority = nr.Notification.Priority.ToString().ToLower(),
+                state = nr.Notification.State.ToString().ToLower(),
+                title = nr.Notification.Title,
+                body = nr.Notification.Body,
+                sound = nr.Notification.Sound,
+                contentAvailable = nr.Notification.ContentAvailable,
+                ownerUserId = nr.Notification.OwnerUserId,
+                initiatorUserId = nr.Notification.InitiatorUserId,
+                initiatorDeviceId = nr.Notification.InitiatorDeviceId,
+                deviceId = nr.Notification.DeviceId,
+                viaDeviceId = nr.Notification.ViaDeviceId,
+                telemetryId = nr.Notification.TelemetryId,
+                batteryLevel = nr.Notification.BatteryLevel,
+                signalStrength = nr.Notification.SignalStrength,
+                signalQuality = nr.Notification.SignalQuality,
         locationJson = nr.Notification.Location,
-        eventTimestamp = nr.Notification.EventTimestamp
-    })
-    .ToListAsync();
+                eventTimestamp = nr.Notification.EventTimestamp
+            })
+            .ToListAsync();
 
         var items = rawItems.Select(x => new
         {
@@ -130,6 +143,13 @@ public class NotificationController : ControllerBase
     }
 
     [HttpGet("{notificationId:guid}")]
+    [SwaggerOperation(
+        Summary = "Get Notification Details",
+        Description = "Retrieves full details of a specific notification by ID"
+    )]
+    [SwaggerResponse(200, "Notification retrieved", typeof(ApiResponse))]
+    [SwaggerResponse(403, "Forbidden - not recipient")]
+    [SwaggerResponse(404, "Notification not found")]
     public async Task<ActionResult<ApiResponse>> GetDetails(Guid notificationId)
     {
         var delivery = await _db.NotificationRecipients
@@ -182,6 +202,12 @@ public class NotificationController : ControllerBase
     }
 
     [HttpGet("{notificationId:guid}/actions")]
+    [SwaggerOperation(
+        Summary = "Get Notification Actions",
+        Description = "Retrieves the action history (acknowledge, resolve, comments) for a notification"
+    )]
+    [SwaggerResponse(200, "Actions retrieved", typeof(ApiResponse))]
+    [SwaggerResponse(404, "Notification not found")]
     public async Task<ActionResult<ApiResponse>> GetActions(Guid notificationId)
     {
         var exists = await _db.NotificationRecipients
@@ -211,11 +237,16 @@ public class NotificationController : ControllerBase
     }
 
     [HttpPost("{notificationId:guid}/acknowledge")]
+    [SwaggerOperation(
+        Summary = "Acknowledge Notification",
+        Description = "Marks a notification as acknowledged with optional comment"
+    )]
+    [SwaggerResponse(200, "Notification acknowledged")]
+    [SwaggerResponse(400, "Invalid comment")]
+    [SwaggerResponse(403, "Forbidden - not recipient")]
+    [SwaggerResponse(404, "Notification not found")]
     public async Task<ActionResult<ApiResponse>> Acknowledge(Guid notificationId, [FromBody] AcknowledgeRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Comment))
-            return BadRequest(new ApiResponse(false, "Comment is required"));
-
         var delivery = await _db.NotificationRecipients
             .FirstOrDefaultAsync(nr => nr.NotificationId == notificationId && nr.RecipientUserId == CurrentUserId);
 
@@ -242,16 +273,21 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Notification acknowledged")
         {
-            Data = new { notificationId, state = "acknowledged", actionId = action.Id }
+            Data = new { notificationId = notificationId, state = "acknowledged", actionId = action.Id }
         });
     }
 
     [HttpPost("{notificationId:guid}/resolve")]
+    [SwaggerOperation(
+        Summary = "Resolve Notification",
+        Description = "Marks a notification as resolved with optional comment"
+    )]
+    [SwaggerResponse(200, "Notification resolved")]
+    [SwaggerResponse(400, "Invalid comment")]
+    [SwaggerResponse(403, "Forbidden - not recipient")]
+    [SwaggerResponse(404, "Notification not found")]
     public async Task<ActionResult<ApiResponse>> Resolve(Guid notificationId, [FromBody] AcknowledgeRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Comment))
-            return BadRequest(new ApiResponse(false, "Comment is required"));
-
         var delivery = await _db.NotificationRecipients
             .FirstOrDefaultAsync(nr => nr.NotificationId == notificationId && nr.RecipientUserId == CurrentUserId);
 
@@ -281,6 +317,7 @@ public class NotificationController : ControllerBase
             Data = new { notificationId, state = "resolved", actionId = action.Id }
         });
     }
+
 
     [HttpGet("snooze-reasons")]
     public IActionResult GetSnoozeReasons()
@@ -342,6 +379,11 @@ public class NotificationController : ControllerBase
     }
 
     [HttpPost("acknowledge/batch")]
+    [SwaggerOperation(
+        Summary = "Batch Acknowledge Notifications",
+        Description = "Acknowledges multiple notifications at once"
+    )]
+    [SwaggerResponse(200, "Batch acknowledge processed")]
     public async Task<ActionResult<ApiResponse>> BatchAcknowledge([FromBody] BatchActionRequest request)
     {
         var results = new List<object>();
@@ -385,6 +427,11 @@ public class NotificationController : ControllerBase
     }
 
     [HttpPost("resolve/batch")]
+    [SwaggerOperation(
+        Summary = "Batch Resolve Notifications",
+        Description = "Resolves multiple notifications at once"
+    )]
+    [SwaggerResponse(200, "Batch resolve processed")]
     public async Task<ActionResult<ApiResponse>> BatchResolve([FromBody] BatchActionRequest request)
     {
         var results = new List<object>();

@@ -5,11 +5,18 @@ using OcufiiAPI.DTO;
 using OcufiiAPI.Models;
 using OcufiiAPI.Repositories;
 using OcufiiAPI.Extensions;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace OcufiiAPI.Controllers
 {
     [ApiController]
     [Route("api/users")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiResponse), 200)]
+    [ProducesResponseType(typeof(ApiResponse), 400)]
+    [ProducesResponseType(typeof(ApiResponse), 401)]
+    [ProducesResponseType(typeof(ApiResponse), 403)]
+    [ProducesResponseType(typeof(ApiResponse), 404)]
     public class UsersController : ControllerBase
     {
         private readonly IRepository<User> _userRepo;
@@ -23,6 +30,14 @@ namespace OcufiiAPI.Controllers
 
         [Authorize]
         [HttpGet("{id:guid}")]
+        [SwaggerOperation(
+            Summary = "Get User by ID",
+            Description = "Retrieves basic user information by ID. Admins can access any user; regular users can only access their own profile."
+        )]
+        [SwaggerResponse(200, "User found", typeof(ApiResponse))]
+        [SwaggerResponse(401, "Unauthorized - missing or invalid token")]
+        [SwaggerResponse(403, "Forbidden - not authorized to view this user")]
+        [SwaggerResponse(404, "User not found or deleted")]
         public async Task<IActionResult> GetById(Guid id)
         {
             var currentUserId = User.GetUserId();
@@ -53,6 +68,13 @@ namespace OcufiiAPI.Controllers
 
         [HttpGet]
         [Authorize(Roles = "admin")]
+        [SwaggerOperation(
+            Summary = "List Users (Admin Only)",
+            Description = "Returns paginated list of active users. Only accessible to admin role."
+        )]
+        [SwaggerResponse(200, "Users retrieved", typeof(object))]
+        [SwaggerResponse(401, "Unauthorized - missing or invalid token")]
+        [SwaggerResponse(403, "Forbidden - not admin")]
         public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             page = Math.Max(1, page);
@@ -73,6 +95,14 @@ namespace OcufiiAPI.Controllers
 
         [HttpPatch("{id:guid}")]
         [Authorize(Policy = "CanEditOwnProfile")]
+        [SwaggerOperation(
+            Summary = "Update User Profile",
+            Description = "Partially updates user profile fields. Only the user themselves or admins can update."
+        )]
+        [SwaggerResponse(200, "User updated")]
+        [SwaggerResponse(401, "Unauthorized")]
+        [SwaggerResponse(403, "Forbidden - not authorized")]
+        [SwaggerResponse(404, "User not found")]
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProfileDto dto)
         {
             var user = await _userRepo.GetByIdAsync(id);
@@ -92,6 +122,14 @@ namespace OcufiiAPI.Controllers
 
         [HttpPatch("{id:guid}/status")]
         [Authorize(Roles = "admin")]
+        [SwaggerOperation(
+            Summary = "Update User Status (Admin Only)",
+            Description = "Enables or disables a user account. Admin only."
+        )]
+        [SwaggerResponse(200, "Status updated")]
+        [SwaggerResponse(401, "Unauthorized")]
+        [SwaggerResponse(403, "Forbidden - not admin")]
+        [SwaggerResponse(404, "User not found")]
         public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateUserStatusDto dto)
         {
             var user = await _userRepo.GetByIdAsync(id);
@@ -107,6 +145,13 @@ namespace OcufiiAPI.Controllers
 
         [HttpPatch("me")]
         [Authorize(Policy = "CanEditOwnProfile")]
+        [SwaggerOperation(
+            Summary = "Update Current User's Profile",
+            Description = "Partially updates the authenticated user's own profile fields"
+        )]
+        [SwaggerResponse(200, "Profile updated")]
+        [SwaggerResponse(401, "Unauthorized")]
+        [SwaggerResponse(404, "User not found")]
         public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileDto dto)
         {
             var userId = User.GetUserId();
@@ -127,6 +172,14 @@ namespace OcufiiAPI.Controllers
 
         [HttpDelete("{id:guid}")]
         [Authorize(Policy = "CanEditOwnProfile")]
+        [SwaggerOperation(
+            Summary = "Delete User (Soft Delete)",
+            Description = "Soft-deletes the user account (sets IsDeleted = true). Only the user themselves or admins can delete."
+        )]
+        [SwaggerResponse(204, "User deleted")]
+        [SwaggerResponse(401, "Unauthorized")]
+        [SwaggerResponse(403, "Forbidden - not authorized")]
+        [SwaggerResponse(404, "User not found")]
         public async Task<IActionResult> Delete(Guid id)
         {
             var user = await _userRepo.GetByIdAsync(id);

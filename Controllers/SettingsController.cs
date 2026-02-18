@@ -8,10 +8,16 @@ using OcufiiAPI.Extensions;
 using Microsoft.Extensions.Options;
 using OcufiiAPI.Configs;
 using Microsoft.EntityFrameworkCore;
+using Swashbuckle.AspNetCore.Annotations;
 
 [ApiController]
 [Route("api/settings/me")]
 [Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiResponse), 200)]
+[ProducesResponseType(typeof(ApiResponse), 400)]
+[ProducesResponseType(typeof(ApiResponse), 401)]
+[ProducesResponseType(typeof(ApiResponse), 404)]
 public class SettingsController : ControllerBase
 {
     private readonly IRepository<UserSetting> _userSettingRepo;
@@ -75,6 +81,12 @@ public class SettingsController : ControllerBase
     }
 
     [HttpPatch]
+    [SwaggerOperation(
+        Summary = "Update User Settings",
+        Description = "Partially updates movement, notification, auto-logout, and other personal settings for the current user"
+    )]
+    [SwaggerResponse(200, "Settings updated successfully")]
+    [SwaggerResponse(400, "Invalid settings values or validation failed")]
     public async Task<IActionResult> Update([FromBody] UpdateSettingsDto dto)
     {
         var userId = User.GetUserId();
@@ -87,7 +99,6 @@ public class SettingsController : ControllerBase
             var upper = dto.NotificationSound.ToUpper();
             if (!_defaults.AllowedNotificationSounds.Contains(upper))
                 return BadRequest(new ApiResponse(false, $"notificationSound must be one of: {string.Join(", ", _defaults.AllowedNotificationSounds)}"));
-
             setting.NotificationSound = Enum.Parse<NotificationSoundType>(upper);
         }
         if (dto.AutoLogoutEnabled.HasValue) setting.AutoLogoutEnabled = dto.AutoLogoutEnabled.Value;
@@ -108,6 +119,11 @@ public class SettingsController : ControllerBase
     }
 
     [HttpGet]
+    [SwaggerOperation(
+        Summary = "Get All User Settings",
+        Description = "Retrieves all current user settings including movement, notification, auto-logout, terms acceptance, and personal safety username"
+    )]
+    [SwaggerResponse(200, "Settings retrieved successfully")]
     public async Task<IActionResult> GetAll()
     {
         var userId = User.GetUserId();
@@ -131,14 +147,26 @@ public class SettingsController : ControllerBase
     }
 
     [HttpGet("assist")]
+    [SwaggerOperation(
+        Summary = "Get Assist Configuration",
+        Description = "Retrieves the full assist/alert configuration for the current user"
+    )]
+    [SwaggerResponse(200, "Assist configuration retrieved")]
     public async Task<IActionResult> GetAssist()
     {
         var userId = User.GetUserId();
         var setting = await GetOrCreateAssistSetting(userId);
+
         return Ok(JsonSerializer.Deserialize<object>(setting.Config));
     }
 
     [HttpPatch("assist/{key}")]
+    [SwaggerOperation(
+        Summary = "Update Specific Assist Configuration",
+        Description = "Updates settings for a specific assist/alert type (e.g., emergency, distress)"
+    )]
+    [SwaggerResponse(200, "Assist settings updated")]
+    [SwaggerResponse(400, "Invalid assist key or request data")]
     public async Task<IActionResult> UpdateAssist(string key, [FromBody] UpdateAssistDto dto)
     {
         var validKeys = new[] { "emergency", "distress", "activeShooter", "emergency911", "emergency988" };
@@ -149,6 +177,7 @@ public class SettingsController : ControllerBase
         var setting = await GetOrCreateAssistSetting(userId);
 
         var config = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(setting.Config)!;
+
         if (!config.ContainsKey(key)) config[key] = JsonSerializer.Deserialize<JsonElement>("{}")!;
 
         var profile = config[key].Deserialize<Dictionary<string, JsonElement>>()!;
@@ -160,6 +189,7 @@ public class SettingsController : ControllerBase
         if (dto.ScreenFlashing.HasValue) profile["screenFlashing"] = JsonDocument.Parse(dto.ScreenFlashing.Value.ToString().ToLower()).RootElement;
 
         config[key] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(profile))!;
+
         setting.Config = JsonSerializer.Serialize(config);
 
         _assistRepo.Update(setting);
@@ -169,6 +199,11 @@ public class SettingsController : ControllerBase
     }
 
     [HttpPost("terms")]
+    [SwaggerOperation(
+        Summary = "Accept Terms of Service",
+        Description = "Records the user's acceptance of the terms of service"
+    )]
+    [SwaggerResponse(200, "Terms accepted")]
     public async Task<IActionResult> AcceptTerms([FromBody] AcceptTermsDto dto)
     {
         var userId = User.GetUserId();
@@ -186,6 +221,12 @@ public class SettingsController : ControllerBase
     }
 
     [HttpGet("terms")]
+    [SwaggerOperation(
+        Summary = "Get Terms Acceptance Status",
+        Description = "Checks if terms have been accepted and returns acceptance details"
+    )]
+    [SwaggerResponse(200, "Terms status retrieved")]
+    [SwaggerResponse(404, "Terms not accepted")]
     public async Task<IActionResult> GetTerms()
     {
         var userId = User.GetUserId();

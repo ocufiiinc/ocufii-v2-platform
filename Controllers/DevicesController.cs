@@ -1,9 +1,12 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.VisualBasic;
 using OcufiiAPI.Data;
+using OcufiiAPI.DTO;
 using OcufiiAPI.Extensions;
 using OcufiiAPI.Models;
+using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -12,6 +15,13 @@ namespace OcufiiAPI.Controllers;
 [ApiController]
 [Route("devices")]
 [Authorize]
+[Produces("application/json")]
+[ProducesResponseType(typeof(ApiResponse), 200)]
+[ProducesResponseType(typeof(ApiResponse), 400)]
+[ProducesResponseType(typeof(ApiResponse), 401)]
+[ProducesResponseType(typeof(ApiResponse), 403)]
+[ProducesResponseType(typeof(ApiResponse), 404)]
+[ProducesResponseType(typeof(ApiResponse), 409)]
 public class DevicesController : ControllerBase
 {
     private readonly OcufiiDbContext _db;
@@ -24,6 +34,9 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet]
+    [SwaggerOperation(Summary = "List Devices", Description = "Returns paginated list of devices with optional filtering by type, enabled status, and search. Admins see all, regular users see their own or unassigned devices.")]
+    [SwaggerResponse(200, "Devices retrieved successfully", typeof(ApiResponse))]
+    [SwaggerResponse(401, "Unauthorized - missing or invalid token")]
     public async Task<ActionResult<ApiResponse>> ListDevices(
         [FromQuery] string? type,
         [FromQuery] bool? isEnabled,
@@ -43,9 +56,7 @@ public class DevicesController : ControllerBase
         var isAdmin = User.IsInRole("admin");
 
         if (!isAdmin)
-        {
             query = query.Where(d => d.UserId == currentUserId || d.UserId == null);
-        }
 
         if (!string.IsNullOrWhiteSpace(type))
             query = query.Where(d => d.DeviceType.Key == type.ToLowerInvariant());
@@ -73,6 +84,7 @@ public class DevicesController : ControllerBase
                 d.MacAddress,
                 d.Name,
                 d.Location,
+                d.Information,
                 d.IsEnabled,
                 d.IsDeleted,
                 Attributes = d.Attributes,
@@ -88,20 +100,29 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<ActionResult<ApiResponse>> CreateDevice([FromBody] JsonElement body)
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [SwaggerOperation(
+    Summary = "Create Device",
+    Description = "Creates a new device. MacAddress must be unique and not active (soft-deleted MacAddresses can be reused)."
+)]
+    public async Task<ActionResult<ApiResponse>> CreateDevice([FromBody] CreateDeviceRequest request)
     {
-        if (!body.TryGetProperty("type", out var typeProp) || string.IsNullOrWhiteSpace(typeProp.GetString()))
+        if (string.IsNullOrWhiteSpace(request.Type))
             return BadRequest(new ApiResponse(false, "Missing or invalid 'type'"));
 
-        var typeKey = typeProp.GetString()!.Trim().ToLowerInvariant();
+        var typeKey = request.Type.Trim().ToLowerInvariant();
         var deviceType = await _db.DeviceTypes.FirstOrDefaultAsync(dt => dt.Key == typeKey);
         if (deviceType == null)
             return BadRequest(new ApiResponse(false, "Invalid device type"));
 
-        if (!body.TryGetProperty("macAddress", out var macProp) || string.IsNullOrWhiteSpace(macProp.GetString()))
+        if (string.IsNullOrWhiteSpace(request.MacAddress))
             return BadRequest(new ApiResponse(false, "Missing or invalid 'macAddress'"));
 
-        var macAddress = macProp.GetString()!.Trim();
+        var macAddress = request.MacAddress.Trim();
         var normalizedMac = macAddress.ToUpperInvariant().Replace(":", "");
 
         var activeDevice = await _db.Devices.FirstOrDefaultAsync(d =>
@@ -114,10 +135,10 @@ public class DevicesController : ControllerBase
         var tenantIdClaim = User.FindFirst("tenant_id")?.Value
                             ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
 
+        Device device;
+
         var softDeletedDevice = await _db.Devices.FirstOrDefaultAsync(d =>
             d.MacAddress.ToUpper() == normalizedMac && d.IsDeleted);
-
-        Device device;
 
         if (softDeletedDevice != null)
         {
@@ -128,9 +149,10 @@ public class DevicesController : ControllerBase
             device.TenantId = Guid.Parse(tenantIdClaim);
             device.UpdatedAt = DateTime.UtcNow;
 
-            device.Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : device.Name;
-            device.Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : device.Location;
-            device.Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : device.Attributes ?? "{}";
+            device.Name = request.Name?.Trim();
+            device.Location = request.Location?.Trim();
+            device.Information = request.Information?.Trim();
+            device.Attributes = request.Attributes ?? "{}";
         }
         else
         {
@@ -139,10 +161,10 @@ public class DevicesController : ControllerBase
                 Id = Guid.NewGuid(),
                 DeviceTypeId = deviceType.Id,
                 MacAddress = normalizedMac,
-                Name = body.TryGetProperty("name", out var n) ? n.GetString()?.Trim() : null,
-                Location = body.TryGetProperty("location", out var l) ? l.GetString()?.Trim() : null,
-                Information = body.TryGetProperty("information", out var i) ? i.GetString()?.Trim() : null,
-                Attributes = body.TryGetProperty("attributes", out var a) ? a.ToString() : "{}",
+                Name = request.Name?.Trim(),
+                Location = request.Location?.Trim(),
+                Information = request.Information?.Trim(),
+                Attributes = request.Attributes ?? "{}",
                 UserId = currentUserId,
                 TenantId = Guid.Parse(tenantIdClaim),
                 IsEnabled = true,
@@ -162,7 +184,38 @@ public class DevicesController : ControllerBase
         });
     }
 
+    [HttpPatch("{deviceId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [SwaggerOperation(
+        Summary = "Update Device",
+        Description = "Partially updates device properties. Only provided fields are updated."
+    )]    
+    public async Task<ActionResult<ApiResponse>> UpdateDevice(Guid deviceId, [FromBody] UpdateDeviceRequest request)
+    {
+        var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
+        if (device == null)
+            return NotFound(new ApiResponse(false, "Device not found"));
+
+        if (request.Name != null) device.Name = request.Name.Trim();
+        if (request.Location != null) device.Location = request.Location.Trim();
+        if (request.Information != null) device.Information = request.Information.Trim();
+        if (request.IsEnabled.HasValue) device.IsEnabled = request.IsEnabled.Value;
+        if (request.Attributes != null) device.Attributes = request.Attributes;
+
+        device.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Device updated successfully"));
+    }
+
     [HttpGet("{deviceId:guid}")]
+    [SwaggerOperation(Summary = "Get Device Details", Description = "Retrieves details of a specific device by ID")]
+    [SwaggerResponse(200, "Device retrieved")]
+    [SwaggerResponse(404, "Device not found or deleted")]
     public async Task<ActionResult<ApiResponse>> GetDevice(Guid deviceId)
     {
         var device = await _db.Devices
@@ -183,6 +236,7 @@ public class DevicesController : ControllerBase
                 device.Name,
                 device.Location,
                 device.IsEnabled,
+                device.Information,
                 device.IsDeleted,
                 Attributes = device.Attributes,
                 device.CreatedAt,
@@ -191,37 +245,10 @@ public class DevicesController : ControllerBase
         });
     }
 
-    [HttpPatch("{deviceId:guid}")]
-    public async Task<ActionResult<ApiResponse>> UpdateDevice(Guid deviceId, [FromBody] JsonElement payload)
-    {
-        var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
-        if (device == null)
-            return NotFound(new ApiResponse(false, "Device not found"));
-
-        if (payload.ValueKind != JsonValueKind.Object)
-            return BadRequest(new ApiResponse(false, "Invalid JSON payload"));
-
-        foreach (var prop in payload.EnumerateObject())
-        {
-            switch (prop.Name.ToLowerInvariant())
-            {
-                case "name": device.Name = prop.Value.GetString()?.Trim(); break;
-                case "location": device.Location = prop.Value.GetString()?.Trim(); break;
-                case "isenabled":
-                    if (prop.Value.ValueKind == JsonValueKind.True) device.IsEnabled = true;
-                    else if (prop.Value.ValueKind == JsonValueKind.False) device.IsEnabled = false;
-                    break;
-                case "attributes": device.Attributes = prop.Value.ToString(); break;
-            }
-        }
-
-        device.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-
-        return Ok(new ApiResponse(true, "Device updated successfully"));
-    }
-
     [HttpDelete("{deviceId:guid}")]
+    [SwaggerOperation(Summary = "Delete Device (Soft Delete)", Description = "Soft-deletes the device (sets IsDeleted = true)")]
+    [SwaggerResponse(200, "Device deleted")]
+    [SwaggerResponse(404, "Device not found")]
     public async Task<ActionResult<ApiResponse>> DeleteDevice(Guid deviceId)
     {
         var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
@@ -237,21 +264,25 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost("{deviceId:guid}/credentials")]
+    [SwaggerOperation(Summary = "Issue Device Credentials", Description = "Issues or regenerates MQTT credentials for the device")]
+    [SwaggerResponse(201, "Credentials issued")]
+    [SwaggerResponse(400, "Device type does not support MQTT")]
+    [SwaggerResponse(404, "Device not found")]
+    [SwaggerResponse(409, "Credentials already exist")]
     public async Task<ActionResult<ApiResponse>> IssueCredentials(Guid deviceId, [FromBody] IssueCredentialsRequest? request)
     {
         request ??= new IssueCredentialsRequest();
-
         var device = await _db.Devices
             .Include(d => d.DeviceType)
             .FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
 
         if (device == null)
             return NotFound(new ApiResponse(false, "Device not found"));
+
         if (!device.DeviceType.ConnectsToMqtt)
             return BadRequest(new ApiResponse(false, "This device type does not support MQTT"));
 
         var existing = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
-
         if (existing != null && !request.Regenerate)
             return Conflict(new ApiResponse(false, "Credentials already exist. Use regenerate=true"));
 
@@ -281,7 +312,9 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet("{deviceId:guid}/credentials")]
-    //[Authorize(Roles = "admin")]
+    [SwaggerOperation(Summary = "Get Device Credentials Metadata", Description = "Retrieves metadata of MQTT credentials (username, enabled status, last rotated)")]
+    [SwaggerResponse(200, "Credentials retrieved")]
+    [SwaggerResponse(404, "Credentials not found")]
     public async Task<ActionResult<ApiResponse>> GetCredentialsMetadata(Guid deviceId)
     {
         var cred = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
@@ -300,6 +333,9 @@ public class DevicesController : ControllerBase
     }
 
     [HttpDelete("{deviceId:guid}/credentials")]
+    [SwaggerOperation(Summary = "Revoke Device Credentials", Description = "Revokes and deletes the MQTT credentials for the device")]
+    [SwaggerResponse(200, "Credentials revoked")]
+    [SwaggerResponse(404, "Credentials not found")]
     public async Task<ActionResult<ApiResponse>> RevokeCredentials(Guid deviceId)
     {
         var cred = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
@@ -313,6 +349,10 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost("{deviceId:guid}/verify-credentials")]
+    [SwaggerOperation(Summary = "Verify Device Credentials", Description = "Verifies if the provided MQTT username and password are valid for the device")]
+    [SwaggerResponse(200, "Verification result")]
+    [SwaggerResponse(400, "Missing username or password")]
+    [SwaggerResponse(404, "Credentials not found or disabled")]
     public async Task<ActionResult<ApiResponse>> VerifyCredentials(Guid deviceId, [FromBody] VerifyCredentialsRequest request)
     {
         if (request == null || string.IsNullOrEmpty(request.MqttUsername) || string.IsNullOrEmpty(request.MqttPassword))
@@ -339,6 +379,8 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet("{deviceId:guid}/telemetry")]
+    [SwaggerOperation(Summary = "Get Device Telemetry", Description = "Retrieves recent telemetry data for the device")]
+    [SwaggerResponse(200, "Telemetry retrieved")]
     public async Task<ActionResult<ApiResponse>> GetTelemetry(Guid deviceId, [FromQuery] int limit = 100, [FromQuery] DateTime? since = null)
     {
         if (limit < 1 || limit > 1000) limit = 100;
@@ -370,6 +412,9 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet("mac-address/check")]
+    [SwaggerOperation(Summary = "Check MacAddress Availability", Description = "Checks if a MacAddress is available (true if new or soft-deleted)")]
+    [SwaggerResponse(200, "Availability checked")]
+    [SwaggerResponse(400, "macAddress is required")]
     public async Task<ActionResult<ApiResponse>> CheckMacAddressAvailability([FromQuery] string macAddress)
     {
         if (string.IsNullOrWhiteSpace(macAddress))
@@ -393,10 +438,15 @@ public class DevicesController : ControllerBase
             }
         });
     }
-
 }
 
 public class IssueCredentialsRequest
 {
     public bool Regenerate { get; set; } = false;
+}
+
+public class VerifyCredentialsRequest
+{
+    public string MqttUsername { get; set; } = string.Empty;
+    public string MqttPassword { get; set; } = string.Empty;
 }
