@@ -246,10 +246,10 @@ public class DevicesController : ControllerBase
         {
             var mqttSuccess = await SendDeviceDeletionMqttMessage(device);
             
-            if (!mqttSuccess)
-            {
-                return StatusCode(500, new ApiResponse(false, "Failed to communicate with device via MQTT after multiple retries"));
-            }
+            //if (!mqttSuccess)
+            //{
+            //    return StatusCode(500, new ApiResponse(false, "Failed to communicate with device via MQTT after multiple retries"));
+            //}
         }
 
         // If MQTT succeeded or device is not gateway/beacon, proceed with soft delete
