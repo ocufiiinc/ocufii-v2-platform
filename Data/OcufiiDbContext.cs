@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using OcufiiAPI.Enums;
 using OcufiiAPI.Models;
 
 namespace OcufiiAPI.Data
@@ -28,6 +29,8 @@ namespace OcufiiAPI.Data
         public DbSet<DeviceToken> DeviceToken { get; set; } = null!;
         public DbSet<PlatformAdmin> PlatformAdmins { get; set; } = null!;
         public DbSet<Reseller> Resellers { get; set; } = null!;
+        public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; } = null!;
+        public DbSet<SafetyLink> SafetyLinks { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -377,6 +380,56 @@ namespace OcufiiAPI.Data
                       .WithMany()
                       .HasForeignKey(e => e.CreatedByAdminId)
                       .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // NEW: SubscriptionPlan
+            modelBuilder.Entity<SubscriptionPlan>(entity =>
+            {
+                entity.ToTable("SubscriptionPlans");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.UserId).IsRequired();
+                entity.Property(e => e.PlanType).IsRequired().HasConversion<string>();
+                entity.Property(e => e.MaxActiveLinks).IsRequired();
+                entity.Property(e => e.IsActive).HasDefaultValue(true);
+                entity.Property(e => e.ExpiryDate).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+                entity.HasOne<User>()
+                      .WithOne()
+                      .HasForeignKey<SubscriptionPlan>(e => e.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(e => e.UserId).IsUnique();  // Performance: unique per user
+            });
+
+            // NEW: SafetyLink
+            modelBuilder.HasPostgresEnum<SafetyLinkStatus>();
+
+            modelBuilder.Entity<SafetyLink>(entity =>
+            {
+                entity.ToTable("SafetyLinks");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.SenderId).IsRequired();
+                entity.Property(e => e.RecipientId).IsRequired();
+                entity.Property(e => e.Status).HasConversion<string>();
+                entity.Property(e => e.AliasName).HasMaxLength(100);
+                entity.Property(e => e.EnableLocation).HasDefaultValue(false);
+                entity.Property(e => e.EnableSafety).HasDefaultValue(false);
+                entity.Property(e => e.EnableSecurity).HasDefaultValue(false);
+                entity.Property(e => e.Snooze).HasDefaultValue(false);
+                entity.Property(e => e.OTP).HasMaxLength(6);  // 6-digit OTP
+                entity.Property(e => e.OTPExpiry).IsRequired(false);
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+                entity.HasOne<User>()
+                      .WithMany()
+                      .HasForeignKey(e => e.SenderId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne<User>()
+                      .WithMany()
+                      .HasForeignKey(e => e.RecipientId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(e => new { e.SenderId, e.RecipientId }).IsUnique();  // No duplicate links
+                entity.HasIndex(e => e.Status);  // Performance for queries
             });
 
             var dateTimeProperties = modelBuilder.Model.GetEntityTypes()

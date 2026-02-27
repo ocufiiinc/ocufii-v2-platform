@@ -1,20 +1,21 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
-using Serilog;
-using Serilog.Events;
-using FluentValidation.AspNetCore;
-using System.Text;
+using Microsoft.OpenApi.Models;
 using OcufiiAPI.Configs;
+using OcufiiAPI.Data;
+using OcufiiAPI.Handler;
 using OcufiiAPI.Models;
 using OcufiiAPI.Repositories;
-using Microsoft.AspNetCore.Diagnostics;
-using OcufiiAPI.Data;
-using Microsoft.OpenApi.Models;
-using OcufiiAPI.Handler;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore.Diagnostics;
+using OcufiiAPI.Services;
+using Serilog;
+using Serilog.Events;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -84,14 +85,27 @@ builder.Services.AddDbContext<OcufiiDbContext>(options =>
 
 // Repositories
 builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
-builder.Services.AddHttpContextAccessor();                                   // ← REQUIRED
-builder.Services.AddScoped<IAuthorizationHandler, SameUserOrAdminHandler>(); // ← YOUR HANDLER
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IAuthorizationHandler, SameUserOrAdminHandler>();
 
 // Configs
 builder.Services.Configure<JwtConfig>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<LegacyConfig>(builder.Configuration.GetSection("LegacyConfig"));
 builder.Services.Configure<SnoozeReasonConfig>(builder.Configuration.GetSection("SnoozeReasons"));
 builder.Services.Configure<MqttConfig>(builder.Configuration.GetSection("Mqtt"));
+
+// Email Service
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddTransient<IEmailService, EmailService>();
+
+//Notification Service
+builder.Services.Configure<NotificationSettings>(builder.Configuration.GetSection("NotificationSettings"));
+builder.Services.AddTransient<INotificationService, NotificationService>();
+
+//Email Templates
+builder.Services.Configure<EmailTemplates>(builder.Configuration.GetSection("EmailTemplates"));
+
+builder.Configuration.AddUserSecrets<Program>();
 
 // JWT Authentication
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtConfig>()!;
@@ -118,6 +132,8 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("CanEditOwnProfile", policy =>
         policy.AddRequirements(new SameUserOrAdminRequirement()));
 });
+
+builder.Services.AddMemoryCache();
 
 var app = builder.Build();
 

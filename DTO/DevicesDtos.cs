@@ -18,4 +18,15 @@
         public string? Information { get; set; }
         public string? Attributes { get; set; } = "{}"; 
     }
+
+    public class IssueCredentialsRequest
+    {
+        public bool Regenerate { get; set; } = false;
+    }
+
+    public class VerifyCredentialsRequest
+    {
+        public string MqttUsername { get; set; } = string.Empty;
+        public string MqttPassword { get; set; } = string.Empty;
+    }
 }

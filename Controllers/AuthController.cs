@@ -8,6 +8,7 @@ using Microsoft.IdentityModel.Tokens;
 using OcufiiAPI.Configs;
 using OcufiiAPI.Data;
 using OcufiiAPI.DTO;
+using OcufiiAPI.Enums;
 using OcufiiAPI.Models;
 using OcufiiAPI.Repositories;
 using OcufiiAPI.Validators;
@@ -54,7 +55,7 @@ public class AuthController : ControllerBase
         _jwt = jwtOptions.Value;
         _legacy = legacyOptions.Value;
     }
-    
+
     [HttpPost("login")]
     [AllowAnonymous]
     [SwaggerOperation(
@@ -71,12 +72,14 @@ public class AuthController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (user == null || _hasher.VerifyHashedPassword(user, user.Password, dto.Password) == PasswordVerificationResult.Failed)
-            return Unauthorized(new ApiResponse(false, "Invalid email or password"));
+            return Unauthorized(new ApiResponse(false, "Invalid email or password")
+            {
+                ErrorCode = "OC-014"
+            });
 
         var (accessToken, refreshToken) = GenerateTokens(user);
         await SaveRefreshToken(user.UserId, refreshToken);
 
-        // Fetch latest device token for this user
         var userDeviceToken = await _db.DeviceToken
             .Where(t => t.UserId == user.UserId)
             .OrderByDescending(t => t.DeviceTokenId)
@@ -105,7 +108,8 @@ public class AuthController : ControllerBase
                     user.Company
                 },
                 deviceToken = userDeviceToken
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -118,7 +122,10 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<ApiResponse>> RegisterDeviceToken([FromBody] DeviceTokenRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.DeviceTokenValue))
-            return BadRequest(new ApiResponse(false, "DeviceTokenValue is required"));
+            return BadRequest(new ApiResponse(false, "DeviceTokenValue is required")
+            {
+                ErrorCode = "OC-015"
+            });
 
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
@@ -131,7 +138,6 @@ public class AuthController : ControllerBase
             existing.MobileDevice = request.MobileDevice;
             existing.MobileOsVersion = request.MobileOsVersion;
             existing.Version = request.Version;
-
             _db.DeviceToken.Update(existing);
         }
         else
@@ -149,7 +155,10 @@ public class AuthController : ControllerBase
 
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Device token registered/updated"));
+        return Ok(new ApiResponse(true, "Device token registered/updated")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpPost("register")]
@@ -171,31 +180,37 @@ public class AuthController : ControllerBase
                 Data = new
                 {
                     errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray()
-                }
+                },
+                ErrorCode = "OC-003"
             });
         }
 
         var existingUser = await _userRepo.Query().AnyAsync(u => u.Email == dto.Email);
         if (existingUser)
-            return Conflict(new ApiResponse(false, "Email already in use"));
+            return Conflict(new ApiResponse(false, "Email already in use")
+            {
+                ErrorCode = "OC-004"
+            });
 
         var role = await _roleRepo.Query()
             .FirstOrDefaultAsync(r => r.RoleName == _legacy.RegistrationRole);
-
         if (role == null)
-            return StatusCode(500, new ApiResponse(false, "Default role not found"));
+            return StatusCode(500, new ApiResponse(false, "Default role not found")
+            {
+                ErrorCode = "OC-005"
+            });
 
         var assignedResellerId = dto.AssignedResellerId ?? new Guid("00000000-0000-0000-0000-000000000001");
-
         var newTenant = new Tenant
         {
-            ResellerId = Guid.NewGuid(), 
-            AssignedResellerId = assignedResellerId,  
+            ResellerId = Guid.NewGuid(),
+            AssignedResellerId = assignedResellerId,
             DateCreated = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
             ThemeConfig = "{}",
             CustomWorkflows = "[]"
         };
+
         _db.Tenants.Add(newTenant);
         await _db.SaveChangesAsync();
 
@@ -224,6 +239,20 @@ public class AuthController : ControllerBase
         await _userRepo.AddAsync(user);
         await _userRepo.SaveAsync();
 
+        var freePlan = new SubscriptionPlan
+        {
+            UserId = user.UserId,
+            PlanType = SubscriptionPlanType.Free,
+            MaxActiveLinks = 1,
+            IsActive = true,
+            ExpiryDate = DateTime.UtcNow.AddYears(10),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.SubscriptionPlans.Add(freePlan);
+        await _db.SaveChangesAsync();
+
         Log.Information("User registered successfully: {Email} | Idempotency-Key: {Key}", user.Email, idempotencyKey);
 
         return Created($"/api/users/{user.UserId}", new ApiResponse(true, "Registration successful")
@@ -234,7 +263,8 @@ public class AuthController : ControllerBase
                 user.Email,
                 user.FirstName,
                 user.LastName
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -247,33 +277,42 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Refresh([FromBody] RefreshDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.RefreshToken))
-            return BadRequest(new ApiResponse(false, "Refresh token is required"));
+            return BadRequest(new ApiResponse(false, "Refresh token is required")
+            {
+                ErrorCode = "OC-006"
+            });
 
         var tokenRecord = await _refreshRepo.Query()
             .FirstOrDefaultAsync(t => t.Token == dto.RefreshToken && t.IsActive);
 
         if (tokenRecord == null || tokenRecord.ExpiresAt <= DateTime.UtcNow)
-            return Unauthorized(new ApiResponse(false, "Invalid or expired refresh token"));
+            return Unauthorized(new ApiResponse(false, "Invalid or expired refresh token")
+            {
+                ErrorCode = "OC-007"
+            });
 
         var user = await _userRepo.Query()
             .FirstOrDefaultAsync(u => u.UserId == tokenRecord.UserId && !u.IsDeleted);
 
         if (user == null)
-            return Unauthorized(new ApiResponse(false, "User not found"));
+            return Unauthorized(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-008"
+            });
 
         tokenRecord.Revoke();
         _refreshRepo.Update(tokenRecord);
 
         var (newAccessToken, newRefreshToken) = GenerateTokens(user);
         await SaveRefreshToken(user.UserId, newRefreshToken);
-
         await _refreshRepo.SaveAsync();
 
         Log.Information("Token refreshed for user: {Email}", user.Email);
 
         return Ok(new ApiResponse(true, "Token refreshed successfully")
         {
-            Data = new { access_token = newAccessToken, refresh_token = newRefreshToken }
+            Data = new { access_token = newAccessToken, refresh_token = newRefreshToken },
+            ErrorCode = null
         });
     }
 
@@ -296,7 +335,10 @@ public class AuthController : ControllerBase
             }
         }
 
-        return Ok(new ApiResponse(true, "Logged out successfully"));
+        return Ok(new ApiResponse(true, "Logged out successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpGet("me")]
@@ -322,11 +364,15 @@ public class AuthController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (user == null)
-            return NotFound(new ApiResponse(false, "User not found"));
+            return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-009"
+            });
 
         return Ok(new ApiResponse(true, "Profile retrieved")
         {
-            Data = user
+            Data = user,
+            ErrorCode = null
         });
     }
 
@@ -339,17 +385,22 @@ public class AuthController : ControllerBase
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var user = await _userRepo.GetByIdAsync(userId);
-
         var verify = _hasher.VerifyHashedPassword(user!, user!.Password, dto.CurrentPassword);
         if (verify == PasswordVerificationResult.Failed)
-            return BadRequest(new ApiResponse(false, "Current password is incorrect"));
+            return BadRequest(new ApiResponse(false, "Current password is incorrect")
+            {
+                ErrorCode = "OC-010"
+            });
 
         user.Password = _hasher.HashPassword(user, dto.NewPassword);
         user.DateUpdated = DateTime.UtcNow;
         _userRepo.Update(user);
         await _userRepo.SaveAsync();
 
-        return Ok(new ApiResponse(true, "Password changed successfully"));
+        return Ok(new ApiResponse(true, "Password changed successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpPut("change-email")]
@@ -365,20 +416,29 @@ public class AuthController : ControllerBase
             .FirstOrDefaultAsync(u => u.UserId == userId && !u.IsDeleted);
 
         if (user == null)
-            return NotFound(new ApiResponse(false, "User not found"));
+            return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-009"
+            });
 
         var emailExists = await _userRepo.Query()
             .AnyAsync(u => u.Email == dto.NewEmail && u.UserId != userId);
 
         if (emailExists)
-            return Conflict(new ApiResponse(false, "Email already in use"));
+            return Conflict(new ApiResponse(false, "Email already in use")
+            {
+                ErrorCode = "OC-004"
+            });
 
         user.Email = dto.NewEmail;
         user.DateUpdated = DateTime.UtcNow;
         _userRepo.Update(user);
         await _userRepo.SaveAsync();
 
-        return Ok(new ApiResponse(true, "Email changed successfully"));
+        return Ok(new ApiResponse(true, "Email changed successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpPost("platform-login")]
@@ -389,22 +449,24 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> PlatformLogin([FromBody] PlatformLoginDto dto)
     {
         var admin = await _db.PlatformAdmins
-        .FirstOrDefaultAsync(a => a.Email == dto.Email);
+            .FirstOrDefaultAsync(a => a.Email == dto.Email);
 
         if (admin == null || _platformHasher.VerifyHashedPassword(admin, admin.PasswordHash, dto.Password) == PasswordVerificationResult.Failed)
-            return Unauthorized(new ApiResponse(false, "Invalid email or password"));
+            return Unauthorized(new ApiResponse(false, "Invalid email or password")
+            {
+                ErrorCode = "OC-011"
+            });
 
         var claims = new[]
         {
-        new Claim(ClaimTypes.Email, admin.Email),
-        new Claim(ClaimTypes.NameIdentifier, admin.AdminId.ToString()),
-        new Claim(ClaimTypes.Name, $"{admin.FirstName} {admin.LastName}".Trim()),
-        new Claim(ClaimTypes.Role, "super_admin")
-    };
+            new Claim(ClaimTypes.Email, admin.Email),
+            new Claim(ClaimTypes.NameIdentifier, admin.AdminId.ToString()),
+            new Claim(ClaimTypes.Name, $"{admin.FirstName} {admin.LastName}".Trim()),
+            new Claim(ClaimTypes.Role, "super_admin")
+        };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
         var token = new JwtSecurityToken(
             issuer: _jwt.Issuer,
             audience: _jwt.Audience,
@@ -432,11 +494,11 @@ public class AuthController : ControllerBase
                     admin.FirstName,
                     admin.LastName
                 }
-            }
+            },
+            ErrorCode = null
         });
     }
 
-    // Private Helpers
     private (string accessToken, string refreshToken) GenerateTokens(User user)
     {
         var claims = new[]
@@ -450,7 +512,6 @@ public class AuthController : ControllerBase
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
         var accessToken = new JwtSecurityToken(
             issuer: _jwt.Issuer,
             audience: _jwt.Audience,
@@ -459,7 +520,6 @@ public class AuthController : ControllerBase
             signingCredentials: creds);
 
         var refreshToken = Guid.NewGuid().ToString("N");
-
         return (new JwtSecurityTokenHandler().WriteToken(accessToken), refreshToken);
     }
 

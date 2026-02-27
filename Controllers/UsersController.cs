@@ -1,10 +1,13 @@
 ﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using OcufiiAPI.DTO;
 using OcufiiAPI.Models;
 using OcufiiAPI.Repositories;
+using System.Text.Json;
 using OcufiiAPI.Extensions;
+using Microsoft.Extensions.Options;
+using OcufiiAPI.Configs;
+using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace OcufiiAPI.Controllers
@@ -48,7 +51,10 @@ namespace OcufiiAPI.Controllers
 
             var user = await _userRepo.GetByIdAsync(id);
             if (user == null || user.IsDeleted)
-                return NotFound(new ApiResponse(false, "User not found"));
+                return NotFound(new ApiResponse(false, "User not found")
+                {
+                    ErrorCode = "OC-055"
+                });
 
             return Ok(new ApiResponse(true, "User found")
             {
@@ -62,7 +68,8 @@ namespace OcufiiAPI.Controllers
                     user.Company,
                     user.IsEnabled,
                     user.AccountType
-                }
+                },
+                ErrorCode = null
             });
         }
 
@@ -106,7 +113,10 @@ namespace OcufiiAPI.Controllers
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProfileDto dto)
         {
             var user = await _userRepo.GetByIdAsync(id);
-            if (user == null || user.IsDeleted) return NotFound();
+            if (user == null || user.IsDeleted) return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-055"
+            });
 
             if (dto.FirstName != null) user.FirstName = dto.FirstName;
             if (dto.LastName != null) user.LastName = dto.LastName;
@@ -117,7 +127,10 @@ namespace OcufiiAPI.Controllers
             _userRepo.Update(user);
             await _userRepo.SaveAsync();
 
-            return Ok(new ApiResponse(true, "User updated"));
+            return Ok(new ApiResponse(true, "User updated")
+            {
+                ErrorCode = null
+            });
         }
 
         [HttpPatch("{id:guid}/status")]
@@ -133,14 +146,21 @@ namespace OcufiiAPI.Controllers
         public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateUserStatusDto dto)
         {
             var user = await _userRepo.GetByIdAsync(id);
-            if (user == null || user.IsDeleted) return NotFound();
+            if (user == null || user.IsDeleted) return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-055"
+            });
 
             user.IsEnabled = dto.IsEnabled;
             user.DateUpdated = DateTime.UtcNow;
+
             _userRepo.Update(user);
             await _userRepo.SaveAsync();
 
-            return Ok(new ApiResponse(true, "Status updated"));
+            return Ok(new ApiResponse(true, "Status updated")
+            {
+                ErrorCode = null
+            });
         }
 
         [HttpPatch("me")]
@@ -156,7 +176,10 @@ namespace OcufiiAPI.Controllers
         {
             var userId = User.GetUserId();
             var user = await _userRepo.GetByIdAsync(userId);
-            if (user == null) return NotFound();
+            if (user == null) return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-055"
+            });
 
             if (dto.FirstName != null) user.FirstName = dto.FirstName;
             if (dto.LastName != null) user.LastName = dto.LastName;
@@ -167,7 +190,10 @@ namespace OcufiiAPI.Controllers
             _userRepo.Update(user);
             await _userRepo.SaveAsync();
 
-            return Ok(new ApiResponse(true, "Profile updated"));
+            return Ok(new ApiResponse(true, "Profile updated")
+            {
+                ErrorCode = null
+            });
         }
 
         [HttpDelete("{id:guid}")]
@@ -183,10 +209,14 @@ namespace OcufiiAPI.Controllers
         public async Task<IActionResult> Delete(Guid id)
         {
             var user = await _userRepo.GetByIdAsync(id);
-            if (user == null || user.IsDeleted) return NotFound();
+            if (user == null || user.IsDeleted) return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-055"
+            });
 
             user.IsDeleted = true;
             user.DateUpdated = DateTime.UtcNow;
+
             _userRepo.Update(user);
             await _userRepo.SaveAsync();
 

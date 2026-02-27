@@ -6,6 +6,7 @@ using OcufiiAPI.Models;
 using OcufiiAPI.Extensions;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Text.Json;
+using OcufiiAPI.DTO;
 
 namespace OcufiiAPI.Controllers;
 
@@ -82,7 +83,7 @@ public class NotificationController : ControllerBase
         query = query.OrderByDescending(nr => nr.Notification.EventTimestamp);
 
         var rawItems = await query
-    .Take(limit)
+            .Take(limit)
             .OrderByDescending(nr => nr.Notification.EventTimestamp)
             .Select(nr => new
             {
@@ -105,7 +106,7 @@ public class NotificationController : ControllerBase
                 batteryLevel = nr.Notification.BatteryLevel,
                 signalStrength = nr.Notification.SignalStrength,
                 signalQuality = nr.Notification.SignalQuality,
-        locationJson = nr.Notification.Location,
+                locationJson = nr.Notification.Location,
                 eventTimestamp = nr.Notification.EventTimestamp
             })
             .ToListAsync();
@@ -131,14 +132,15 @@ public class NotificationController : ControllerBase
             signalStrength = x.signalStrength,
             signalQuality = x.signalQuality,
             location = string.IsNullOrEmpty(x.locationJson)
-        ? null
-        : JsonSerializer.Deserialize<object>(x.locationJson),
+                ? null
+                : JsonSerializer.Deserialize<object>(x.locationJson),
             eventTimestamp = x.eventTimestamp
         }).ToList();
 
         return Ok(new ApiResponse(true, "Notifications retrieved")
         {
-            Data = new { items, page = new { nextCursor = (string?)null } }
+            Data = new { items, page = new { nextCursor = (string?)null } },
+            ErrorCode = null
         });
     }
 
@@ -166,7 +168,10 @@ public class NotificationController : ControllerBase
             .FirstOrDefaultAsync(nr => nr.NotificationId == notificationId && nr.RecipientUserId == CurrentUserId);
 
         if (delivery == null)
-            return NotFound(new ApiResponse(false, "Notification not found or access denied"));
+            return NotFound(new ApiResponse(false, "Notification not found or access denied")
+            {
+                ErrorCode = "OC-027"
+            });
 
         var n = delivery.Notification;
 
@@ -197,7 +202,8 @@ public class NotificationController : ControllerBase
                 rawEvent = n.RawEvent,
                 eventTimestamp = n.EventTimestamp,
                 createdAt = n.CreatedAt
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -232,7 +238,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Actions retrieved")
         {
-            Data = new { items = actions }
+            Data = new { items = actions },
+            ErrorCode = null
         });
     }
 
@@ -255,7 +262,10 @@ public class NotificationController : ControllerBase
 
         var notification = await _db.Notifications.FindAsync(notificationId);
         if (notification == null)
-            return NotFound(new ApiResponse(false, "Notification not found"));
+            return NotFound(new ApiResponse(false, "Notification not found")
+            {
+                ErrorCode = "OC-028"
+            });
 
         notification.State = NotificationState.Acknowledged;
         notification.UpdatedAt = DateTime.UtcNow;
@@ -273,7 +283,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Notification acknowledged")
         {
-            Data = new { notificationId = notificationId, state = "acknowledged", actionId = action.Id }
+            Data = new { notificationId = notificationId, state = "acknowledged", actionId = action.Id },
+            ErrorCode = null
         });
     }
 
@@ -296,7 +307,10 @@ public class NotificationController : ControllerBase
 
         var notification = await _db.Notifications.FindAsync(notificationId);
         if (notification == null)
-            return NotFound(new ApiResponse(false, "Notification not found"));
+            return NotFound(new ApiResponse(false, "Notification not found")
+            {
+                ErrorCode = "OC-028"
+            });
 
         notification.State = NotificationState.Resolved;
         notification.UpdatedAt = DateTime.UtcNow;
@@ -314,10 +328,10 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Notification resolved")
         {
-            Data = new { notificationId, state = "resolved", actionId = action.Id }
+            Data = new { notificationId, state = "resolved", actionId = action.Id },
+            ErrorCode = null
         });
     }
-
 
     [HttpGet("snooze-reasons")]
     public IActionResult GetSnoozeReasons()
@@ -333,7 +347,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Snooze reasons retrieved")
         {
-            Data = new { items = reasons }
+            Data = new { items = reasons },
+            ErrorCode = null
         });
     }
 
@@ -341,7 +356,10 @@ public class NotificationController : ControllerBase
     public async Task<ActionResult<ApiResponse>> GetIdsByDevice([FromQuery] Guid deviceId)
     {
         if (deviceId == Guid.Empty)
-            return BadRequest(new ApiResponse(false, "deviceId required"));
+            return BadRequest(new ApiResponse(false, "deviceId required")
+            {
+                ErrorCode = "OC-029"
+            });
 
         var ids = await _db.Notifications
             .Where(n => n.DeviceId == deviceId || n.ViaDeviceId == deviceId || n.InitiatorDeviceId == deviceId)
@@ -350,7 +368,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Notification IDs retrieved")
         {
-            Data = new { ids }
+            Data = new { ids },
+            ErrorCode = null
         });
     }
 
@@ -374,7 +393,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Unacknowledged notifications retrieved")
         {
-            Data = new { items }
+            Data = new { items },
+            ErrorCode = null
         });
     }
 
@@ -422,7 +442,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Batch acknowledge processed")
         {
-            Data = new { results }
+            Data = new { results },
+            ErrorCode = null
         });
     }
 
@@ -470,23 +491,8 @@ public class NotificationController : ControllerBase
 
         return Ok(new ApiResponse(true, "Batch resolve processed")
         {
-            Data = new { results }
+            Data = new { results },
+            ErrorCode = null
         });
     }
-}
-
-public class AcknowledgeRequest
-{
-    public string Comment { get; set; } = string.Empty;
-}
-
-public class BatchActionRequest
-{
-    public List<BatchActionItem> Items { get; set; } = new();
-}
-
-public class BatchActionItem
-{
-    public Guid NotificationId { get; set; }
-    public string? Comment { get; set; }
 }

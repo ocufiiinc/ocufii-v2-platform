@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
 using OcufiiAPI.DTO;
+using OcufiiAPI.Enums;
 using OcufiiAPI.Models;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
@@ -42,8 +43,8 @@ public class AdminController : ControllerBase
                 .ThenInclude(u => u.Role)
             .Select(t => new
             {
-                t.ResellerId,                // Existing PK
-                t.AssignedResellerId,        // NEW: shows commercial Reseller
+                t.ResellerId,
+                t.AssignedResellerId,
                 t.DateCreated,
                 t.DateUpdated,
                 t.ThemeConfig,
@@ -68,7 +69,8 @@ public class AdminController : ControllerBase
 
         return Ok(new ApiResponse(true, "Tenants retrieved successfully")
         {
-            Data = tenants
+            Data = tenants,
+            ErrorCode = null
         });
     }
 
@@ -79,14 +81,16 @@ public class AdminController : ControllerBase
     public async Task<ActionResult<ApiResponse>> CreateTenant([FromBody] CreateTenantRequest request)
     {
         if (request == null)
-            return BadRequest(new ApiResponse(false, "Invalid request body"));
+            return BadRequest(new ApiResponse(false, "Invalid request body")
+            {
+                ErrorCode = "OC-001"  // Invalid request body
+            });
 
         var defaultResellerId = new Guid("00000000-0000-0000-0000-000000000001");
-
         var tenant = new Tenant
         {
-            ResellerId = Guid.NewGuid(),                    // PK
-            AssignedResellerId = request.AssignedResellerId ?? defaultResellerId,  // NEW: commercial attribution
+            ResellerId = Guid.NewGuid(),
+            AssignedResellerId = request.AssignedResellerId ?? defaultResellerId,
             DateCreated = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
             ThemeConfig = request.ThemeConfig ?? "{}",
@@ -98,7 +102,8 @@ public class AdminController : ControllerBase
 
         return Created($"/admin/tenants/{tenant.ResellerId}", new ApiResponse(true, "Tenant created successfully")
         {
-            Data = new { tenant.ResellerId, tenant.AssignedResellerId, tenant.DateCreated }
+            Data = new { tenant.ResellerId, tenant.AssignedResellerId, tenant.DateCreated },
+            ErrorCode = null
         });
     }
 
@@ -109,15 +114,14 @@ public class AdminController : ControllerBase
     {
         var currentUserId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var currentUser = await _db.Users.FirstOrDefaultAsync(u => u.UserId == currentUserId);
-
         if (currentUser == null)
-            return NotFound(new ApiResponse(false, "Current user not found"));
+            return NotFound(new ApiResponse(false, "Current user not found")
+            {
+                ErrorCode = "OC-002"  // Current user not found
+            });
 
         var isSuperAdmin = User.IsInRole("super_admin");
-
-        var query = _db.Users
-            .Where(u => !u.IsDeleted);
-
+        var query = _db.Users.Where(u => !u.IsDeleted);
         if (!isSuperAdmin)
             query = query.Where(u => u.TenantId == currentUser.TenantId);
 
@@ -139,7 +143,8 @@ public class AdminController : ControllerBase
 
         return Ok(new ApiResponse(true, "Users retrieved successfully")
         {
-            Data = users
+            Data = users,
+            ErrorCode = null
         });
     }
 
@@ -151,37 +156,46 @@ public class AdminController : ControllerBase
     {
         var currentUserId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var currentUser = await _db.Users.Include(u => u.Tenant).FirstOrDefaultAsync(u => u.UserId == currentUserId);
-
         if (currentUser == null)
-            return NotFound(new ApiResponse(false, "Current user not found"));
+            return NotFound(new ApiResponse(false, "Current user not found")
+            {
+                ErrorCode = "OC-002"  // Current user not found
+            });
 
         var isSuperAdmin = User.IsInRole("super_admin");
-
         Guid tenantId;
         Guid? assignedResellerId;
 
         if (isSuperAdmin)
         {
             if (request.TenantId == null)
-                return BadRequest(new ApiResponse(false, "TenantId required for super admin"));
+                return BadRequest(new ApiResponse(false, "TenantId required for super admin")
+                {
+                    ErrorCode = "OC-003"  // TenantId required
+                });
 
             tenantId = request.TenantId.Value;
-
             var chosenTenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId);
             if (chosenTenant == null)
-                return NotFound(new ApiResponse(false, "Tenant not found"));
+                return NotFound(new ApiResponse(false, "Tenant not found")
+                {
+                    ErrorCode = "OC-004"  // Tenant not found
+                });
 
             assignedResellerId = request.AssignedResellerId ?? chosenTenant.AssignedResellerId;
         }
         else
         {
             tenantId = currentUser.TenantId!.Value;
-            assignedResellerId = currentUser.Tenant!.AssignedResellerId;  // inherit from tenant
+            assignedResellerId = currentUser.Tenant!.AssignedResellerId;
         }
 
         var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == request.Role);
         if (role == null)
-            return BadRequest(new ApiResponse(false, "Invalid role"));
+            return BadRequest(new ApiResponse(false, "Invalid role")
+            {
+                ErrorCode = "OC-005"  // Invalid role
+            });
 
         var newUser = new User
         {
@@ -204,9 +218,25 @@ public class AdminController : ControllerBase
         _db.Users.Add(newUser);
         await _db.SaveChangesAsync();
 
+        // Auto-assign Free plan
+        var freePlan = new SubscriptionPlan
+        {
+            UserId = newUser.UserId,
+            PlanType = SubscriptionPlanType.Free,
+            MaxActiveLinks = 1,
+            IsActive = true,
+            ExpiryDate = DateTime.UtcNow.AddYears(10),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.SubscriptionPlans.Add(freePlan);
+        await _db.SaveChangesAsync();
+
         return Created($"/admin/users/{newUser.UserId}", new ApiResponse(true, "User created successfully")
         {
-            Data = new { newUser.UserId, newUser.Email }
+            Data = new { newUser.UserId, newUser.Email },
+            ErrorCode = null
         });
     }
 
@@ -218,12 +248,18 @@ public class AdminController : ControllerBase
     {
         var parent = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id && !u.IsDeleted);
         if (parent == null)
-            return NotFound(new ApiResponse(false, "Parent user not found"));
+            return NotFound(new ApiResponse(false, "Parent user not found")
+            {
+                ErrorCode = "OC-006"  // Parent user not found
+            });
 
         var roleName = string.IsNullOrEmpty(request.Role) ? "viewer" : request.Role;
         var userRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
         if (userRole == null)
-            return BadRequest(new ApiResponse(false, $"Role '{roleName}' not found"));
+            return BadRequest(new ApiResponse(false, $"Role '{roleName}' not found")
+            {
+                ErrorCode = "OC-005"  // Invalid role
+            });
 
         var dependent = new User
         {
@@ -236,7 +272,7 @@ public class AdminController : ControllerBase
             Username = request.Email.Split('@')[0],
             Password = _hasher.HashPassword(null!, "TempPass@2025!"),
             RoleId = userRole.RoleId,
-            TenantId = parent.TenantId,  // inherit from parent (same Tenant)
+            TenantId = parent.TenantId,
             ParentId = parent.UserId,
             IsEnabled = true,
             IsDeleted = false,
@@ -247,12 +283,26 @@ public class AdminController : ControllerBase
         _db.Users.Add(dependent);
         await _db.SaveChangesAsync();
 
+        var freePlan = new SubscriptionPlan
+        {
+            UserId = dependent.UserId,
+            PlanType = SubscriptionPlanType.Free,
+            MaxActiveLinks = 1,
+            IsActive = true,
+            ExpiryDate = DateTime.UtcNow.AddYears(10),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.SubscriptionPlans.Add(freePlan);
+        await _db.SaveChangesAsync();
+
         return Created($"/admin/users/{dependent.UserId}", new ApiResponse(true, "Dependent created successfully")
         {
-            Data = new { dependent.UserId, dependent.Email }
+            Data = new { dependent.UserId, dependent.Email },
+            ErrorCode = null
         });
     }
-
 
     [HttpGet("users/{id:guid}/features")]
     [SwaggerOperation(Summary = "Get User Features", Description = "Returns all features assigned to the user")]
@@ -266,10 +316,16 @@ public class AdminController : ControllerBase
             .FirstOrDefaultAsync(u => u.UserId == id);
 
         if (user == null)
-            return NotFound(new ApiResponse(false, "User not found"));
+            return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-007"  // User not found
+            });
 
         if (user.ParentId == user.UserId || user.ParentId == null)
-            return BadRequest(new ApiResponse(false, "User is not a dependent"));
+            return BadRequest(new ApiResponse(false, "User is not a dependent")
+            {
+                ErrorCode = "OC-008"  // Not a dependent user
+            });
 
         return Ok(new ApiResponse(true, "User features retrieved")
         {
@@ -280,7 +336,8 @@ public class AdminController : ControllerBase
                 uf.Right,
                 uf.Feature.Key,
                 uf.Feature.Name
-            })
+            }),
+            ErrorCode = null
         });
     }
 
@@ -297,7 +354,8 @@ public class AdminController : ControllerBase
                 f.Name,
                 f.Description,
                 f.DeviceTypeId
-            })
+            }),
+            ErrorCode = null
         });
     }
 
@@ -310,15 +368,24 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id && !u.IsDeleted);
         if (user == null)
-            return NotFound(new ApiResponse(false, "User not found"));
+            return NotFound(new ApiResponse(false, "User not found")
+            {
+                ErrorCode = "OC-007"  // User not found
+            });
 
         var feature = await _db.Features.FirstOrDefaultAsync(f => f.Id == request.FeatureId);
         if (feature == null)
-            return BadRequest(new ApiResponse(false, "Invalid feature"));
+            return BadRequest(new ApiResponse(false, "Invalid feature")
+            {
+                ErrorCode = "OC-009"  // Invalid feature
+            });
 
         var existing = await _db.UserFeatures.FirstOrDefaultAsync(uf => uf.UserId == id && uf.FeatureId == request.FeatureId);
         if (existing != null)
-            return Conflict(new ApiResponse(false, "Feature already assigned"));
+            return Conflict(new ApiResponse(false, "Feature already assigned")
+            {
+                ErrorCode = "OC-010"  // Feature already assigned
+            });
 
         var userFeature = new UserFeature
         {
@@ -340,7 +407,8 @@ public class AdminController : ControllerBase
                 userFeature.FeatureId,
                 userFeature.IsEnabled,
                 userFeature.Right
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -352,7 +420,10 @@ public class AdminController : ControllerBase
     {
         var userFeature = await _db.UserFeatures.FirstOrDefaultAsync(uf => uf.UserId == id && uf.FeatureId == featureId);
         if (userFeature == null)
-            return NotFound(new ApiResponse(false, "User feature not found"));
+            return NotFound(new ApiResponse(false, "User feature not found")
+            {
+                ErrorCode = "OC-011"  // User feature not found
+            });
 
         userFeature.IsEnabled = request.IsEnabled;
         userFeature.Right = request.Right;
@@ -368,7 +439,8 @@ public class AdminController : ControllerBase
                 userFeature.FeatureId,
                 userFeature.IsEnabled,
                 userFeature.Right
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -380,12 +452,18 @@ public class AdminController : ControllerBase
     {
         var userFeature = await _db.UserFeatures.FirstOrDefaultAsync(uf => uf.UserId == id && uf.FeatureId == featureId);
         if (userFeature == null)
-            return NotFound(new ApiResponse(false, "User feature not found"));
+            return NotFound(new ApiResponse(false, "User feature not found")
+            {
+                ErrorCode = "OC-011"  // User feature not found
+            });
 
         _db.UserFeatures.Remove(userFeature);
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Feature removed successfully"));
+        return Ok(new ApiResponse(true, "Feature removed successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpPost("resellers")]
@@ -397,11 +475,17 @@ public class AdminController : ControllerBase
     public async Task<ActionResult<ApiResponse>> CreateReseller([FromBody] CreateResellerRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest(new ApiResponse(false, "Name and Email are required"));
+            return BadRequest(new ApiResponse(false, "Name and Email are required")
+            {
+                ErrorCode = "OC-001"  // Required fields missing
+            });
 
         var existing = await _db.Resellers.AnyAsync(r => r.Email == request.Email);
         if (existing)
-            return Conflict(new ApiResponse(false, "Email already in use"));
+            return Conflict(new ApiResponse(false, "Email already in use")
+            {
+                ErrorCode = "OC-012"  // Email already in use
+            });
 
         var tempPassword = Guid.NewGuid().ToString("N").Substring(0, 12);
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
@@ -422,8 +506,7 @@ public class AdminController : ControllerBase
         _db.Resellers.Add(reseller);
         await _db.SaveChangesAsync();
 
-        // TODO: Send email with tempPassword (implement your email service)
-        // e.g. await _emailService.SendResellerWelcome(reseller.Email, tempPassword);
+        // TODO: Send email with tempPassword
 
         return Created($"/admin/resellers/{reseller.ResellerId}", new ApiResponse(true, "Reseller created")
         {
@@ -432,8 +515,9 @@ public class AdminController : ControllerBase
                 reseller.ResellerId,
                 reseller.Name,
                 reseller.Email,
-                TemporaryPassword = tempPassword  // Remove in production
-            }
+                TemporaryPassword = tempPassword // Remove in production
+            },
+            ErrorCode = null
         });
     }
 
@@ -459,7 +543,8 @@ public class AdminController : ControllerBase
 
         return Ok(new ApiResponse(true, "Resellers retrieved")
         {
-            Data = resellers
+            Data = resellers,
+            ErrorCode = null
         });
     }
 
@@ -472,11 +557,17 @@ public class AdminController : ControllerBase
     {
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId);
         if (tenant == null)
-            return NotFound(new ApiResponse(false, "Tenant not found"));
+            return NotFound(new ApiResponse(false, "Tenant not found")
+            {
+                ErrorCode = "OC-004"  // Tenant not found
+            });
 
         var newReseller = await _db.Resellers.FirstOrDefaultAsync(r => r.ResellerId == request.NewResellerId);
         if (newReseller == null)
-            return NotFound(new ApiResponse(false, "New Reseller not found"));
+            return NotFound(new ApiResponse(false, "New Reseller not found")
+            {
+                ErrorCode = "OC-013"  // New Reseller not found
+            });
 
         tenant.AssignedResellerId = request.NewResellerId;
         tenant.DateUpdated = DateTime.UtcNow;
@@ -486,8 +577,8 @@ public class AdminController : ControllerBase
 
         return Ok(new ApiResponse(true, "Tenant reassigned successfully")
         {
-            Data = new { tenant.ResellerId, newResellerId = request.NewResellerId }
+            Data = new { tenant.ResellerId, newResellerId = request.NewResellerId },
+            ErrorCode = null
         });
     }
-
 }

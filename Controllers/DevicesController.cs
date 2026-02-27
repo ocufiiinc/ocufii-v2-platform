@@ -104,7 +104,8 @@ public class DevicesController : ControllerBase
 
         return Ok(new ApiResponse(true, "Devices retrieved successfully")
         {
-            Data = new { items, total, page, pageSize }
+            Data = new { items, total, page, pageSize },
+            ErrorCode = null
         });
     }
 
@@ -115,21 +116,30 @@ public class DevicesController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [SwaggerOperation(
-    Summary = "Create Device",
-    Description = "Creates a new device. MacAddress must be unique and not active (soft-deleted MacAddresses can be reused)."
-)]
+        Summary = "Create Device",
+        Description = "Creates a new device. MacAddress must be unique and not active (soft-deleted MacAddresses can be reused)."
+    )]
     public async Task<ActionResult<ApiResponse>> CreateDevice([FromBody] CreateDeviceRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Type))
-            return BadRequest(new ApiResponse(false, "Missing or invalid 'type'"));
+            return BadRequest(new ApiResponse(false, "Missing or invalid 'type'")
+            {
+                ErrorCode = "OC-016"
+            });
 
         var typeKey = request.Type.Trim().ToLowerInvariant();
         var deviceType = await _db.DeviceTypes.FirstOrDefaultAsync(dt => dt.Key == typeKey);
         if (deviceType == null)
-            return BadRequest(new ApiResponse(false, "Invalid device type"));
+            return BadRequest(new ApiResponse(false, "Invalid device type")
+            {
+                ErrorCode = "OC-017"
+            });
 
         if (string.IsNullOrWhiteSpace(request.MacAddress))
-            return BadRequest(new ApiResponse(false, "Missing or invalid 'macAddress'"));
+            return BadRequest(new ApiResponse(false, "Missing or invalid 'macAddress'")
+            {
+                ErrorCode = "OC-018"
+            });
 
         var macAddress = request.MacAddress.Trim();
         var normalizedMac = macAddress.ToUpperInvariant().Replace(":", "");
@@ -138,14 +148,16 @@ public class DevicesController : ControllerBase
             d.MacAddress.ToUpper() == normalizedMac && !d.IsDeleted);
 
         if (activeDevice != null)
-            return Conflict(new ApiResponse(false, "MacAddress already exists and is active"));
+            return Conflict(new ApiResponse(false, "MacAddress already exists and is active")
+            {
+                ErrorCode = "OC-019"
+            });
 
         var currentUserId = User.GetUserId();
         var tenantIdClaim = User.FindFirst("tenant_id")?.Value
                             ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
 
         Device device;
-
         var softDeletedDevice = await _db.Devices.FirstOrDefaultAsync(d =>
             d.MacAddress.ToUpper() == normalizedMac && d.IsDeleted);
 
@@ -157,7 +169,6 @@ public class DevicesController : ControllerBase
             device.UserId = currentUserId;
             device.TenantId = Guid.Parse(tenantIdClaim);
             device.UpdatedAt = DateTime.UtcNow;
-
             device.Name = request.Name?.Trim();
             device.Location = request.Location?.Trim();
             device.Information = request.Information?.Trim();
@@ -181,7 +192,6 @@ public class DevicesController : ControllerBase
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
-
             _db.Devices.Add(device);
         }
 
@@ -189,7 +199,8 @@ public class DevicesController : ControllerBase
 
         return Created($"/devices/{device.Id}", new ApiResponse(true, "Device created/reused successfully")
         {
-            Data = new { deviceId = device.Id }
+            Data = new { deviceId = device.Id },
+            ErrorCode = null
         });
     }
 
@@ -207,7 +218,10 @@ public class DevicesController : ControllerBase
     {
         var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
         if (device == null)
-            return NotFound(new ApiResponse(false, "Device not found"));
+            return NotFound(new ApiResponse(false, "Device not found")
+            {
+                ErrorCode = "OC-020"
+            });
 
         if (request.Name != null) device.Name = request.Name.Trim();
         if (request.Location != null) device.Location = request.Location.Trim();
@@ -216,9 +230,13 @@ public class DevicesController : ControllerBase
         if (request.Attributes != null) device.Attributes = request.Attributes;
 
         device.UpdatedAt = DateTime.UtcNow;
+
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Device updated successfully"));
+        return Ok(new ApiResponse(true, "Device updated successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpGet("{deviceId:guid}")]
@@ -233,7 +251,10 @@ public class DevicesController : ControllerBase
             .FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
 
         if (device == null)
-            return NotFound(new ApiResponse(false, "Device not found"));
+            return NotFound(new ApiResponse(false, "Device not found")
+            {
+                ErrorCode = "OC-020"
+            });
 
         return Ok(new ApiResponse(true, "Device retrieved successfully")
         {
@@ -250,7 +271,8 @@ public class DevicesController : ControllerBase
                 Attributes = device.Attributes,
                 device.CreatedAt,
                 device.UpdatedAt
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -265,73 +287,70 @@ public class DevicesController : ControllerBase
             .FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
 
         if (device == null)
-            return NotFound(new ApiResponse(false, "Device not found"));
+            return NotFound(new ApiResponse(false, "Device not found")
+            {
+                ErrorCode = "OC-020"
+            });
 
         var deviceTypeKey = device.DeviceType.Key.ToLowerInvariant();
 
-        // MQTT communication for gateway or beacon deletion
         if (deviceTypeKey == "gateway" || deviceTypeKey == "beacon")
         {
             var mqttSuccess = await SendDeviceDeletionMqttMessage(device);
-
             if (!mqttSuccess)
             {
-                return StatusCode(500, new ApiResponse(false, "Failed to communicate with device via MQTT after multiple retries"));
+                return StatusCode(500, new ApiResponse(false, "Failed to communicate with device via MQTT after multiple retries")
+                {
+                    ErrorCode = "OC-021"
+                });
             }
         }
 
-        // If MQTT succeeded or device is not gateway/beacon, proceed with soft delete
         device.IsDeleted = true;
         device.IsEnabled = false;
         device.UpdatedAt = DateTime.UtcNow;
+
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Device deleted successfully"));
+        return Ok(new ApiResponse(true, "Device deleted successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     private async Task<bool> SendDeviceDeletionMqttMessage(Device device)
     {
         var cleanMac = device.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
-
         if (device.DeviceType.Key.ToLowerInvariant() == "gateway")
         {
-            // Gateway deletion - send msg_id=1001 for reset
             return await SendGatewayResetMessage(cleanMac);
         }
         else if (device.DeviceType.Key.ToLowerInvariant() == "beacon")
         {
-            // Beacon deletion - send msg_id=1028 with remaining beacons to all gateways
             return await SendBeaconDeletionToGateways(device);
         }
-
         return true;
     }
 
     private async Task<bool> SendGatewayResetMessage(string gatewayMac)
     {
         const int maxRetries = 2;
-
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
             IMqttClient? mqttClient = null;
-
             try
             {
                 var factory = new MqttFactory();
                 mqttClient?.Dispose();
                 mqttClient = factory.CreateMqttClient();
-
                 var deviceId = $"test{gatewayMac}";
                 var publishTopic = $"MINI-02-58B6/{deviceId}/app_to_device";
                 var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
-
                 var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
-
                 mqttClient.ApplicationMessageReceivedAsync += e =>
                 {
                     var topic = e.ApplicationMessage.Topic;
                     var payload = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-
                     try
                     {
                         var json = JsonSerializer.Deserialize<JsonDocument>(payload);
@@ -344,10 +363,8 @@ public class DevicesController : ControllerBase
                         receivedMessages.Add((null, payload, DateTime.UtcNow));
                         _logger.LogWarning($"Gateway {gatewayMac}: Failed to parse msg_id from: {payload}");
                     }
-
                     return Task.CompletedTask;
                 };
-
                 var clientOptions = new MqttClientOptionsBuilder()
                     .WithTcpServer(_mqttConfig.Host, _mqttConfig.Port)
                     .WithCredentials(_mqttConfig.Username, _mqttConfig.Password)
@@ -358,51 +375,39 @@ public class DevicesController : ControllerBase
                         o.WithCertificateValidationHandler(_ => true);
                     })
                     .Build();
-
                 await mqttClient.ConnectAsync(clientOptions, CancellationToken.None);
                 await Task.Delay(1000);
-
                 await mqttClient.SubscribeAsync(subscribeTopic);
-
                 var payload = new
                 {
                     msg_id = 1001,
                     device_info = new { device_id = deviceId, mac = gatewayMac },
                     data = new { reset_state = 1 }
                 };
-
                 var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
                 {
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
                 });
-
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(publishTopic)
                     .WithPayload(json)
                     .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
                     .Build();
-
                 _logger.LogInformation($"Gateway {gatewayMac}: Publishing reset message (msg_id=1001)");
                 await mqttClient.PublishAsync(message, CancellationToken.None);
-
-                // Wait for acknowledgment - filter only for msg_id=1001
                 var startTime = DateTime.UtcNow;
                 var timeout = TimeSpan.FromSeconds(3);
-
                 while ((DateTime.UtcNow - startTime) < timeout)
                 {
                     var ack = receivedMessages.FirstOrDefault(m => m.msgId == 1001);
-
                     if (ack.msgId == 1001)
                     {
                         _logger.LogInformation($"Gateway {gatewayMac}: Received acknowledgment for msg_id=1001 (attempt {attempt}/{maxRetries})");
                         await mqttClient.DisconnectAsync();
                         return true;
                     }
-
                     await Task.Delay(50);
                 }
-
                 _logger.LogWarning($"Gateway {gatewayMac}: No acknowledgment for msg_id=1001 within timeout (attempt {attempt}/{maxRetries}). Received {receivedMessages.Count} total messages.");
                 await mqttClient.DisconnectAsync();
             }
@@ -414,21 +419,17 @@ public class DevicesController : ControllerBase
             {
                 mqttClient?.Dispose();
             }
-
             if (attempt < maxRetries)
             {
                 await Task.Delay(1000);
             }
         }
-
         return false;
     }
 
     private async Task<bool> SendBeaconDeletionToGateways(Device beaconDevice)
     {
         var userId = beaconDevice.UserId;
-
-        // Get all beacons for this user except the one being deleted
         var remainingBeacons = await _db.Devices
             .Include(d => d.DeviceType)
             .Where(d => d.UserId == userId && d.DeviceType.Key == "beacon" && d.Id != beaconDevice.Id && !d.IsDeleted)
@@ -438,46 +439,27 @@ public class DevicesController : ControllerBase
             .Select(b => b.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant())
             .ToArray();
 
-        // Get all gateways for this user
         var gateways = await _db.Devices
             .Include(d => d.DeviceType)
             .Where(d => d.UserId == userId && d.DeviceType.Key == "gateway" && !d.IsDeleted)
             .ToListAsync();
 
         if (gateways.Count == 0)
-        {
-            // No gateways, no need to update
             return true;
-        }
 
         int successCount = 0;
         int failureCount = 0;
 
-        // For each gateway, send update message with retry mechanism
         foreach (var gateway in gateways)
         {
             var gatewayMac = gateway.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
-
             bool gatewaySuccess = await SendBeaconListToGateway(gatewayMac, beaconMacs);
-
-            if (gatewaySuccess)
-            {
-                successCount++;
-                _logger.LogInformation($"Successfully updated gateway {gatewayMac} for beacon deletion");
-            }
-            else
-            {
-                failureCount++;
-                _logger.LogWarning($"Failed to update gateway {gatewayMac} for beacon deletion");
-            }
+            if (gatewaySuccess) successCount++;
+            else failureCount++;
         }
 
-        // Consider it success if at least one gateway was updated successfully
         if (successCount > 0)
-        {
-            _logger.LogInformation($"Beacon deletion: {successCount}/{gateways.Count} gateways updated successfully");
             return true;
-        }
 
         return false;
     }
@@ -485,28 +467,22 @@ public class DevicesController : ControllerBase
     private async Task<bool> SendBeaconListToGateway(string gatewayMac, string[] beaconMacs)
     {
         const int maxRetries = 2;
-
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
             IMqttClient? mqttClient = null;
-
             try
             {
                 var factory = new MqttFactory();
                 mqttClient?.Dispose();
                 mqttClient = factory.CreateMqttClient();
-
                 var deviceId = $"test{gatewayMac}";
                 var publishTopic = $"MINI-02-58B6/{deviceId}/app_to_device";
                 var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
-
                 var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
-
                 mqttClient.ApplicationMessageReceivedAsync += e =>
                 {
                     var topic = e.ApplicationMessage.Topic;
                     var payload = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-
                     try
                     {
                         var json = JsonSerializer.Deserialize<JsonDocument>(payload);
@@ -519,10 +495,8 @@ public class DevicesController : ControllerBase
                         receivedMessages.Add((null, payload, DateTime.UtcNow));
                         _logger.LogWarning($"Gateway {gatewayMac}: Failed to parse msg_id from: {payload}");
                     }
-
                     return Task.CompletedTask;
                 };
-
                 var clientOptions = new MqttClientOptionsBuilder()
                     .WithTcpServer(_mqttConfig.Host, _mqttConfig.Port)
                     .WithCredentials(_mqttConfig.Username, _mqttConfig.Password)
@@ -533,16 +507,12 @@ public class DevicesController : ControllerBase
                         o.WithCertificateValidationHandler(_ => true);
                     })
                     .Build();
-
                 await mqttClient.ConnectAsync(clientOptions, CancellationToken.None);
                 await Task.Delay(1000);
-
                 await mqttClient.SubscribeAsync(subscribeTopic);
-
                 object step3Data;
                 if (beaconMacs.Length == 0)
                 {
-                    // No remaining beacons - send zeros
                     step3Data = new
                     {
                         precise = 0,
@@ -553,7 +523,6 @@ public class DevicesController : ControllerBase
                 }
                 else
                 {
-                    // Has remaining beacons
                     step3Data = new
                     {
                         precise = 0,
@@ -562,46 +531,36 @@ public class DevicesController : ControllerBase
                         rule = beaconMacs
                     };
                 }
-
                 var payload = new
                 {
                     msg_id = 1028,
                     device_info = new { device_id = deviceId, mac = gatewayMac },
                     data = step3Data
                 };
-
                 var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
                 {
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
                 });
-
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(publishTopic)
                     .WithPayload(json)
                     .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
                     .Build();
-
                 _logger.LogInformation($"Gateway {gatewayMac}: Publishing beacon list update (msg_id=1028) with {beaconMacs.Length} beacons");
                 await mqttClient.PublishAsync(message, CancellationToken.None);
-
-                // Wait for acknowledgment - filter only for msg_id=1028
                 var startTime = DateTime.UtcNow;
                 var timeout = TimeSpan.FromSeconds(3);
-
                 while ((DateTime.UtcNow - startTime) < timeout)
                 {
                     var ack = receivedMessages.FirstOrDefault(m => m.msgId == 1028);
-
                     if (ack.msgId == 1028)
                     {
                         _logger.LogInformation($"Gateway {gatewayMac}: Received acknowledgment for msg_id=1028 (attempt {attempt}/{maxRetries})");
                         await mqttClient.DisconnectAsync();
                         return true;
                     }
-
                     await Task.Delay(50);
                 }
-
                 _logger.LogWarning($"Gateway {gatewayMac}: No acknowledgment for msg_id=1028 within timeout (attempt {attempt}/{maxRetries}). Received {receivedMessages.Count} total messages.");
                 await mqttClient.DisconnectAsync();
             }
@@ -613,13 +572,11 @@ public class DevicesController : ControllerBase
             {
                 mqttClient?.Dispose();
             }
-
             if (attempt < maxRetries)
             {
                 await Task.Delay(1000);
             }
         }
-
         return false;
     }
 
@@ -637,14 +594,23 @@ public class DevicesController : ControllerBase
             .FirstOrDefaultAsync(d => d.Id == deviceId && !d.IsDeleted);
 
         if (device == null)
-            return NotFound(new ApiResponse(false, "Device not found"));
+            return NotFound(new ApiResponse(false, "Device not found")
+            {
+                ErrorCode = "OC-020"
+            });
 
         if (!device.DeviceType.ConnectsToMqtt)
-            return BadRequest(new ApiResponse(false, "This device type does not support MQTT"));
+            return BadRequest(new ApiResponse(false, "This device type does not support MQTT")
+            {
+                ErrorCode = "OC-022"
+            });
 
         var existing = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
         if (existing != null && !request.Regenerate)
-            return Conflict(new ApiResponse(false, "Credentials already exist. Use regenerate=true"));
+            return Conflict(new ApiResponse(false, "Credentials already exist. Use regenerate=true")
+            {
+                ErrorCode = "OC-023"
+            });
 
         if (existing != null) _db.DeviceCredentials.Remove(existing);
 
@@ -667,7 +633,8 @@ public class DevicesController : ControllerBase
 
         return Created("", new ApiResponse(true, "Credentials issued successfully")
         {
-            Data = new { mqttUsername = username, mqttPassword = password }
+            Data = new { mqttUsername = username, mqttPassword = password },
+            ErrorCode = null
         });
     }
 
@@ -679,7 +646,10 @@ public class DevicesController : ControllerBase
     {
         var cred = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
         if (cred == null)
-            return NotFound(new ApiResponse(false, "Credentials not found"));
+            return NotFound(new ApiResponse(false, "Credentials not found")
+            {
+                ErrorCode = "OC-024"
+            });
 
         return Ok(new ApiResponse(true, "Credentials retrieved")
         {
@@ -688,7 +658,8 @@ public class DevicesController : ControllerBase
                 cred.MqttUsername,
                 cred.IsEnabled,
                 cred.LastRotatedAt
-            }
+            },
+            ErrorCode = null
         });
     }
 
@@ -700,12 +671,18 @@ public class DevicesController : ControllerBase
     {
         var cred = await _db.DeviceCredentials.FirstOrDefaultAsync(c => c.DeviceId == deviceId);
         if (cred == null)
-            return NotFound(new ApiResponse(false, "Credentials not found"));
+            return NotFound(new ApiResponse(false, "Credentials not found")
+            {
+                ErrorCode = "OC-024"
+            });
 
         _db.DeviceCredentials.Remove(cred);
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Credentials revoked successfully"));
+        return Ok(new ApiResponse(true, "Credentials revoked successfully")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpPost("{deviceId:guid}/verify-credentials")]
@@ -716,25 +693,33 @@ public class DevicesController : ControllerBase
     public async Task<ActionResult<ApiResponse>> VerifyCredentials(Guid deviceId, [FromBody] VerifyCredentialsRequest request)
     {
         if (request == null || string.IsNullOrEmpty(request.MqttUsername) || string.IsNullOrEmpty(request.MqttPassword))
-            return BadRequest(new ApiResponse(false, "MqttUsername and MqttPassword are required"));
+            return BadRequest(new ApiResponse(false, "MqttUsername and MqttPassword are required")
+            {
+                ErrorCode = "OC-025"
+            });
 
         var cred = await _db.DeviceCredentials
             .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.IsEnabled);
 
         if (cred == null)
-            return NotFound(new ApiResponse(false, "Credentials not found or disabled"));
+            return NotFound(new ApiResponse(false, "Credentials not found or disabled")
+            {
+                ErrorCode = "OC-024"
+            });
 
         if (!string.Equals(cred.MqttUsername, request.MqttUsername, StringComparison.OrdinalIgnoreCase))
             return Ok(new ApiResponse(true, "Verification result")
             {
-                Data = new { isValid = false }
+                Data = new { isValid = false },
+                ErrorCode = null
             });
 
         bool isValid = BCrypt.Net.BCrypt.Verify(request.MqttPassword, cred.PasswordHash);
 
         return Ok(new ApiResponse(true, "Verification result")
         {
-            Data = new { isValid }
+            Data = new { isValid },
+            ErrorCode = null
         });
     }
 
@@ -767,7 +752,8 @@ public class DevicesController : ControllerBase
 
         return Ok(new ApiResponse(true, "Telemetry retrieved successfully")
         {
-            Data = new { items }
+            Data = new { items },
+            ErrorCode = null
         });
     }
 
@@ -778,10 +764,12 @@ public class DevicesController : ControllerBase
     public async Task<ActionResult<ApiResponse>> CheckMacAddressAvailability([FromQuery] string macAddress)
     {
         if (string.IsNullOrWhiteSpace(macAddress))
-            return BadRequest(new ApiResponse(false, "macAddress is required"));
+            return BadRequest(new ApiResponse(false, "macAddress is required")
+            {
+                ErrorCode = "OC-026"
+            });
 
         var normalizedMac = macAddress.Trim().ToUpperInvariant().Replace(":", "");
-
         var device = await _db.Devices
             .FirstOrDefaultAsync(d => d.MacAddress.ToUpper() == normalizedMac);
 
@@ -795,18 +783,8 @@ public class DevicesController : ControllerBase
                 isAvailable,
                 isSoftDeleted = device?.IsDeleted ?? false,
                 existingDeviceId = device?.Id
-            }
+            },
+            ErrorCode = null
         });
     }
-}
-
-public class IssueCredentialsRequest
-{
-    public bool Regenerate { get; set; } = false;
-}
-
-public class VerifyCredentialsRequest
-{
-    public string MqttUsername { get; set; } = string.Empty;
-    public string MqttPassword { get; set; } = string.Empty;
 }

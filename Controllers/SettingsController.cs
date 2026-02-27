@@ -1,14 +1,22 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using OcufiiAPI.DTO;
-using OcufiiAPI.Models;
-using OcufiiAPI.Repositories;
-using System.Text.Json;
-using OcufiiAPI.Extensions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using OcufiiAPI.Configs;
-using Microsoft.EntityFrameworkCore;
+using OcufiiAPI.Data;
+using OcufiiAPI.DTO;
+using OcufiiAPI.Enums;
+using OcufiiAPI.Extensions;
+using OcufiiAPI.Models;
+using OcufiiAPI.Repositories;
+using OcufiiAPI.Services;
 using Swashbuckle.AspNetCore.Annotations;
+using System;
+using System.Linq;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 [ApiController]
 [Route("api/settings/me")]
@@ -54,6 +62,7 @@ public class SettingsController : ControllerBase
                 AutoLogoutInterval = _defaults.AutoLogoutInterval,
                 BypassFocus = _defaults.BypassFocus
             };
+
             await _userSettingRepo.AddAsync(setting);
             await _userSettingRepo.SaveAsync();
         }
@@ -94,20 +103,32 @@ public class SettingsController : ControllerBase
 
         if (dto.MovementSound.HasValue) setting.MovementSound = dto.MovementSound.Value;
         if (dto.MovementVibration.HasValue) setting.MovementVibration = dto.MovementVibration.Value;
+
         if (!string.IsNullOrEmpty(dto.NotificationSound))
         {
             var upper = dto.NotificationSound.ToUpper();
             if (!_defaults.AllowedNotificationSounds.Contains(upper))
-                return BadRequest(new ApiResponse(false, $"notificationSound must be one of: {string.Join(", ", _defaults.AllowedNotificationSounds)}"));
+                return BadRequest(new ApiResponse(false, $"notificationSound must be one of: {string.Join(", ", _defaults.AllowedNotificationSounds)}")
+                {
+                    ErrorCode = "OC-051"
+                });
+
             setting.NotificationSound = Enum.Parse<NotificationSoundType>(upper);
         }
+
         if (dto.AutoLogoutEnabled.HasValue) setting.AutoLogoutEnabled = dto.AutoLogoutEnabled.Value;
+
         if (dto.AutoLogoutInterval.HasValue)
         {
             if (dto.AutoLogoutInterval < _defaults.MinAutoLogoutInterval || dto.AutoLogoutInterval > _defaults.MaxAutoLogoutInterval)
-                return BadRequest(new ApiResponse(false, $"autoLogoutInterval must be between {_defaults.MinAutoLogoutInterval} and {_defaults.MaxAutoLogoutInterval} minutes"));
+                return BadRequest(new ApiResponse(false, $"autoLogoutInterval must be between {_defaults.MinAutoLogoutInterval} and {_defaults.MaxAutoLogoutInterval} minutes")
+                {
+                    ErrorCode = "OC-052"
+                });
+
             setting.AutoLogoutInterval = dto.AutoLogoutInterval.Value;
         }
+
         if (dto.BypassFocus.HasValue) setting.BypassFocus = dto.BypassFocus.Value;
         if (dto.PersonalSafetyUsername != null) setting.PersonalSafetyUsername = dto.PersonalSafetyUsername;
 
@@ -115,7 +136,10 @@ public class SettingsController : ControllerBase
         _userSettingRepo.Update(setting);
         await _userSettingRepo.SaveAsync();
 
-        return Ok(new ApiResponse(true, "Settings updated"));
+        return Ok(new ApiResponse(true, "Settings updated")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpGet]
@@ -143,7 +167,11 @@ public class SettingsController : ControllerBase
             termsAcceptedAt = setting.TermsAcceptedAt?.ToString("yyyy-MM-ddTHH:mm:ssZ")
         };
 
-        return Ok(new { ok = true, data });
+        return Ok(new ApiResponse(true, "Settings retrieved successfully")
+        {
+            Data = data,
+            ErrorCode = null
+        });
     }
 
     [HttpGet("assist")]
@@ -171,13 +199,15 @@ public class SettingsController : ControllerBase
     {
         var validKeys = new[] { "emergency", "distress", "activeShooter", "emergency911", "emergency988" };
         if (!validKeys.Contains(key))
-            return BadRequest(new ApiResponse(false, "Invalid assist key"));
+            return BadRequest(new ApiResponse(false, "Invalid assist key")
+            {
+                ErrorCode = "OC-053"
+            });
 
         var userId = User.GetUserId();
         var setting = await GetOrCreateAssistSetting(userId);
 
         var config = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(setting.Config)!;
-
         if (!config.ContainsKey(key)) config[key] = JsonSerializer.Deserialize<JsonElement>("{}")!;
 
         var profile = config[key].Deserialize<Dictionary<string, JsonElement>>()!;
@@ -189,13 +219,15 @@ public class SettingsController : ControllerBase
         if (dto.ScreenFlashing.HasValue) profile["screenFlashing"] = JsonDocument.Parse(dto.ScreenFlashing.Value.ToString().ToLower()).RootElement;
 
         config[key] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(profile))!;
-
         setting.Config = JsonSerializer.Serialize(config);
 
         _assistRepo.Update(setting);
         await _assistRepo.SaveAsync();
 
-        return Ok(new ApiResponse(true, "Assist settings updated"));
+        return Ok(new ApiResponse(true, "Assist settings updated")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpPost("terms")]
@@ -217,7 +249,10 @@ public class SettingsController : ControllerBase
         _userSettingRepo.Update(setting);
         await _userSettingRepo.SaveAsync();
 
-        return Ok(new ApiResponse(true, "Terms accepted"));
+        return Ok(new ApiResponse(true, "Terms accepted")
+        {
+            ErrorCode = null
+        });
     }
 
     [HttpGet("terms")]
@@ -233,7 +268,10 @@ public class SettingsController : ControllerBase
         var setting = (await _userSettingRepo.FindAsync(s => s.UserId == userId)).FirstOrDefault();
 
         if (setting?.TermsAcceptedAt == null)
-            return NotFound(new ApiResponse(false, "Terms not accepted"));
+            return NotFound(new ApiResponse(false, "Terms not accepted")
+            {
+                ErrorCode = "OC-054"
+            });
 
         return Ok(new
         {

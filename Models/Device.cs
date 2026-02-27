@@ -34,10 +34,4 @@
 
         public Device Device { get; set; } = null!;
     }
-
-    public class VerifyCredentialsRequest
-    {
-        public string MqttUsername { get; set; } = string.Empty;
-        public string MqttPassword { get; set; } = string.Empty;
-    }
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -6,7 +7,10 @@ using MQTTnet;
 using MQTTnet.Client;
 using OcufiiAPI.Configs;
 using OcufiiAPI.Data;
+using OcufiiAPI.Enums;
 using OcufiiAPI.Models;
+using OcufiiAPI.Services;
+using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -21,13 +25,18 @@ namespace OcufiiAPI.Controllers
         private readonly IWebHostEnvironment _env;
         private readonly IOptions<SnoozeReasonConfig> _snoozeConfig;
         private readonly MqttConfig _mqttConfig;
+        private readonly IEmailService _emailService;
+        private readonly INotificationService _notificationService;
 
-        public DebugController(OcufiiDbContext db, IWebHostEnvironment env, IOptions<SnoozeReasonConfig> snoozeConfig, IOptions<MqttConfig> mqttConfig)
+        public DebugController(OcufiiDbContext db, IWebHostEnvironment env, IOptions<SnoozeReasonConfig> snoozeConfig, IOptions<MqttConfig> mqttConfig, IEmailService emailService,
+            INotificationService notificationService)
         {
             _db = db;
             _env = env;
             _snoozeConfig = snoozeConfig;
             _mqttConfig = mqttConfig.Value;
+            _emailService = emailService;
+            _notificationService = notificationService;
         }
 
         private bool AllowAll => _env.IsDevelopment() ||
@@ -962,6 +971,65 @@ namespace OcufiiAPI.Controllers
             }
         }
 
+        [HttpPost("test-email")]
+        [SwaggerOperation(Summary = "Test Email Sending")]
+        public async Task<IActionResult> TestEmail([FromBody] TestEmailRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.ToEmail))
+                return BadRequest("ToEmail is required");
+
+            try
+            {
+                await _emailService.SendEmailAsync(
+                    toEmail: request.ToEmail,
+                    subject: "Ocufii V2 Test Email",
+                    body: $"<h1>Hello from Ocufii V2 Platform!</h1><p>This is a test email sent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC.</p><p>Service is working correctly.</p>",
+                    isHtml: true
+                );
+
+                return Ok(new { message = $"Test email sent to {request.ToEmail}" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Test FCM Notification Service - sends to a single device token
+        /// </summary>
+        /// <remarks>
+        /// Paste a real FCM token from your mobile app (Android/iOS).
+        /// You can get tokens from logs or your DeviceToken table.
+        /// </remarks>
+        [HttpPost("test-notification")]
+        [SwaggerOperation(Summary = "Test FCM Notification")]
+        public async Task<IActionResult> TestNotification([FromBody] TestNotificationRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.DeviceToken))
+                return BadRequest("DeviceToken is required");
+
+            try
+            {
+                await _notificationService.SendNotificationAsync(
+                    deviceToken: request.DeviceToken,
+                    title: "Ocufii Test Notification",
+                    body: $"This is a test push from server at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC.",
+                    data: new Dictionary<string, string>
+                    {
+                        { "testKey", "testValue" },
+                        { "debug", "true" }
+                    }
+                );
+
+                return Ok(new { message = $"Test notification sent to token: {request.DeviceToken}" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
         private async Task<IActionResult> ExecuteGatewayFlow(
             string gatewayMac,
             string[] beaconMacs,
@@ -1587,6 +1655,16 @@ namespace OcufiiAPI.Controllers
         Gateway = 1,
         Beacon = 2,
         SafetyCard = 3
+    }
+
+    public class TestEmailRequest
+    {
+        public string ToEmail { get; set; } = string.Empty;
+    }
+
+    public class TestNotificationRequest
+    {
+        public string DeviceToken { get; set; } = string.Empty;
     }
 
     public class TestGatewayFilterRequest
