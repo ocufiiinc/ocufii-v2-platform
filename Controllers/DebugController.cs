@@ -837,7 +837,7 @@ namespace OcufiiAPI.Controllers
                             // Gateway registration - find all beacons for this gateway's user
                             var gatewayDevice = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "gateway");
+                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "gateway" && d.IsDeleted==false);
 
                             if (gatewayDevice == null)
                             {
@@ -851,7 +851,7 @@ namespace OcufiiAPI.Controllers
                             // Find all beacons for this user
                             var beaconDevices = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .Where(d => d.UserId == gatewayDevice.UserId && d.DeviceType.Key == "beacon")
+                                .Where(d => d.UserId == gatewayDevice.UserId && d.DeviceType.Key == "beacon" && d.IsDeleted==false)
                                 .ToListAsync();
 
                             var beaconMacs = beaconDevices
@@ -876,7 +876,7 @@ namespace OcufiiAPI.Controllers
                             // Beacon addition - find all gateways for this beacon's user
                             var beaconDevice = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "beacon");
+                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "beacon" && d.IsDeleted == false);
 
                             if (beaconDevice == null)
                             {
@@ -890,7 +890,7 @@ namespace OcufiiAPI.Controllers
                             // Find all gateways for this user
                             var gatewayDevices = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "gateway")
+                                .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "gateway" && d.IsDeleted == false)
                                 .ToListAsync();
 
                             if (gatewayDevices.Count == 0)
@@ -912,7 +912,7 @@ namespace OcufiiAPI.Controllers
                                 // Find all beacons for this user (same as beaconDevice.UserId)
                                 var beaconsForUser = await _db.Devices
                                     .Include(d => d.DeviceType)
-                                    .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "beacon")
+                                    .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "beacon" && d.IsDeleted==false)
                                     .ToListAsync();
 
                                 var beaconMacs = beaconsForUser
