@@ -685,41 +685,34 @@ public class DevicesController : ControllerBase
         });
     }
 
-    [HttpPost("{deviceId:guid}/verify-credentials")]
-    [SwaggerOperation(Summary = "Verify Device Credentials", Description = "Verifies if the provided MQTT username and password are valid for the device")]
-    [SwaggerResponse(200, "Verification result")]
-    [SwaggerResponse(400, "Missing username or password")]
-    [SwaggerResponse(404, "Credentials not found or disabled")]
-    public async Task<ActionResult<ApiResponse>> VerifyCredentials(Guid deviceId, [FromBody] VerifyCredentialsRequest request)
+    [HttpPost("verify-credentials")]
+    [AllowAnonymous]
+    [SwaggerOperation(
+    Summary = "Verify MQTT Credentials (for EMQX)",
+    Description = "EMQX HTTP authenticator endpoint."
+)]
+    [SwaggerResponse(200, "Credentials verified (allow/deny)", typeof(object))]
+    public async Task<IActionResult> VerifyCredentials([FromBody] VerifyCredentialsRequest request)
     {
         if (request == null || string.IsNullOrEmpty(request.MqttUsername) || string.IsNullOrEmpty(request.MqttPassword))
-            return BadRequest(new ApiResponse(false, "MqttUsername and MqttPassword are required")
-            {
-                ErrorCode = "OC-025"
-            });
+        {
+            return Ok(new { result = "deny" });
+        }
 
         var cred = await _db.DeviceCredentials
-            .FirstOrDefaultAsync(c => c.DeviceId == deviceId && c.IsEnabled);
+            .FirstOrDefaultAsync(c => c.MqttUsername == request.MqttUsername && c.IsEnabled);
 
         if (cred == null)
-            return NotFound(new ApiResponse(false, "Credentials not found or disabled")
-            {
-                ErrorCode = "OC-024"
-            });
-
-        if (!string.Equals(cred.MqttUsername, request.MqttUsername, StringComparison.OrdinalIgnoreCase))
-            return Ok(new ApiResponse(true, "Verification result")
-            {
-                Data = new { isValid = false },
-                ErrorCode = null
-            });
+        {
+            return Ok(new { result = "deny" });
+        }
 
         bool isValid = BCrypt.Net.BCrypt.Verify(request.MqttPassword, cred.PasswordHash);
 
-        return Ok(new ApiResponse(true, "Verification result")
+        return Ok(new
         {
-            Data = new { isValid },
-            ErrorCode = null
+            result = isValid ? "allow" : "deny",
+            is_superuser = false  // we don't support superuser flag
         });
     }
 

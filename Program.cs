@@ -78,6 +78,18 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll",
+        policy =>
+        {
+            policy.SetIsOriginAllowed(_ => true)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+        });
+});
+
 // Database
 builder.Services.AddDbContext<OcufiiDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("OcufiiConnection"))
@@ -207,6 +219,7 @@ app.Use(async (context, next) =>
 });
 
 app.UseHttpsRedirection();
+app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

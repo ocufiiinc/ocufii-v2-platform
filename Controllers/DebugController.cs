@@ -824,7 +824,7 @@ namespace OcufiiAPI.Controllers
             const int relationshipRule = 1;
             const int duplicateRule = 1;
             const int duplicateTime = 10;
-            
+
             var cleanMac = request.Mac.Replace(":", "").Replace("-", "").ToUpperInvariant();
             var allFlowAttempts = new List<object>();
 
@@ -837,7 +837,7 @@ namespace OcufiiAPI.Controllers
                             // Gateway registration - find all beacons for this gateway's user
                             var gatewayDevice = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "gateway");
+                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "gateway" && d.IsDeleted == false);
 
                             if (gatewayDevice == null)
                             {
@@ -851,7 +851,7 @@ namespace OcufiiAPI.Controllers
                             // Find all beacons for this user
                             var beaconDevices = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .Where(d => d.UserId == gatewayDevice.UserId && d.DeviceType.Key == "beacon")
+                                .Where(d => d.UserId == gatewayDevice.UserId && d.DeviceType.Key == "beacon" && d.IsDeleted == false)
                                 .ToListAsync();
 
                             var beaconMacs = beaconDevices
@@ -876,7 +876,7 @@ namespace OcufiiAPI.Controllers
                             // Beacon addition - find all gateways for this beacon's user
                             var beaconDevice = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "beacon");
+                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "beacon" && d.IsDeleted == false);
 
                             if (beaconDevice == null)
                             {
@@ -890,7 +890,7 @@ namespace OcufiiAPI.Controllers
                             // Find all gateways for this user
                             var gatewayDevices = await _db.Devices
                                 .Include(d => d.DeviceType)
-                                .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "gateway")
+                                .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "gateway" && d.IsDeleted == false)
                                 .ToListAsync();
 
                             if (gatewayDevices.Count == 0)
@@ -912,7 +912,7 @@ namespace OcufiiAPI.Controllers
                                 // Find all beacons for this user (same as beaconDevice.UserId)
                                 var beaconsForUser = await _db.Devices
                                     .Include(d => d.DeviceType)
-                                    .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "beacon")
+                                    .Where(d => d.UserId == beaconDevice.UserId && d.DeviceType.Key == "beacon" && d.IsDeleted == false)
                                     .ToListAsync();
 
                                 var beaconMacs = beaconsForUser
@@ -1045,7 +1045,7 @@ namespace OcufiiAPI.Controllers
             var steps = new List<object>();
             var receivedMessages = new List<object>();
             IMqttClient? mqttClient = null;
-            
+
             const int maxFlowRetries = 2;
 
             try
@@ -1054,7 +1054,7 @@ namespace OcufiiAPI.Controllers
                 {
                     steps = new List<object>();
                     receivedMessages = new List<object>();
-                    
+
                     try
                     {
                         var factory = new MqttFactory();
@@ -1087,9 +1087,9 @@ namespace OcufiiAPI.Controllers
                             return Task.CompletedTask;
                         };
 
-                        steps.Add(new 
-                        { 
-                            step = "flow_attempt", 
+                        steps.Add(new
+                        {
+                            step = "flow_attempt",
                             attempt = flowAttempt,
                             maxAttempts = maxFlowRetries,
                             message = $"Starting gateway registration flow attempt {flowAttempt}/{maxFlowRetries}"
@@ -1205,13 +1205,13 @@ namespace OcufiiAPI.Controllers
                             await mqttClient.DisconnectAsync();
                             steps.Add(new { step = "disconnect_on_failure", reason = "Step 1 failed" });
                             allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages });
-                            
+
                             if (flowAttempt < maxFlowRetries)
                             {
                                 await Task.Delay(1000);
                                 continue;
                             }
-                            
+
                             return Ok(new
                             {
                                 success = false,
@@ -1242,13 +1242,13 @@ namespace OcufiiAPI.Controllers
                             await mqttClient.DisconnectAsync();
                             steps.Add(new { step = "disconnect_on_failure", reason = "Step 2 failed" });
                             allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages });
-                            
+
                             if (flowAttempt < maxFlowRetries)
                             {
                                 await Task.Delay(1000);
                                 continue;
                             }
-                            
+
                             return Ok(new
                             {
                                 success = false,
@@ -1303,13 +1303,13 @@ namespace OcufiiAPI.Controllers
                             await mqttClient.DisconnectAsync();
                             steps.Add(new { step = "disconnect_on_failure", reason = "Step 3 failed" });
                             allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages });
-                            
+
                             if (flowAttempt < maxFlowRetries)
                             {
                                 await Task.Delay(1000);
                                 continue;
                             }
-                            
+
                             return Ok(new
                             {
                                 success = false,
@@ -1347,22 +1347,22 @@ namespace OcufiiAPI.Controllers
                     {
                         steps.Add(new { step = "error_in_flow", error = innerEx.Message });
                         allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages, error = innerEx.Message });
-                        
+
                         if (mqttClient != null)
                         {
                             try { await mqttClient.DisconnectAsync(); } catch { }
                         }
-                        
+
                         if (flowAttempt < maxFlowRetries)
                         {
                             await Task.Delay(1000);
                             continue;
                         }
-                        
+
                         throw;
                     }
                 }
-                
+
                 return Ok(new
                 {
                     success = false,
@@ -1391,7 +1391,7 @@ namespace OcufiiAPI.Controllers
             var steps = new List<object>();
             var receivedMessages = new List<object>();
             IMqttClient? mqttClient = null;
-            
+
             const int maxFlowRetries = 2;
 
             try
@@ -1400,7 +1400,7 @@ namespace OcufiiAPI.Controllers
                 {
                     steps = new List<object>();
                     receivedMessages = new List<object>();
-                    
+
                     try
                     {
                         var factory = new MqttFactory();
@@ -1433,9 +1433,9 @@ namespace OcufiiAPI.Controllers
                             return Task.CompletedTask;
                         };
 
-                        steps.Add(new 
-                        { 
-                            step = "flow_attempt", 
+                        steps.Add(new
+                        {
+                            step = "flow_attempt",
                             attempt = flowAttempt,
                             maxAttempts = maxFlowRetries,
                             message = $"Starting beacon add flow attempt {flowAttempt}/{maxFlowRetries}"
@@ -1574,13 +1574,13 @@ namespace OcufiiAPI.Controllers
                             await mqttClient.DisconnectAsync();
                             steps.Add(new { step = "disconnect_on_failure", reason = "Step 3 failed" });
                             allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages });
-                            
+
                             if (flowAttempt < maxFlowRetries)
                             {
                                 await Task.Delay(1000);
                                 continue;
                             }
-                            
+
                             return new
                             {
                                 success = false,
@@ -1617,22 +1617,22 @@ namespace OcufiiAPI.Controllers
                     {
                         steps.Add(new { step = "error_in_flow", error = innerEx.Message });
                         allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages, error = innerEx.Message });
-                        
+
                         if (mqttClient != null)
                         {
                             try { await mqttClient.DisconnectAsync(); } catch { }
                         }
-                        
+
                         if (flowAttempt < maxFlowRetries)
                         {
                             await Task.Delay(1000);
                             continue;
                         }
-                        
+
                         throw;
                     }
                 }
-                
+
                 return new
                 {
                     success = false,

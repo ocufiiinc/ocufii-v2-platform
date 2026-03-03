@@ -47,5 +47,6 @@ namespace OcufiiAPI.DTO
         public bool Snooze { get; set; }
         public DateTime? SnoozeStartTime { get; set; }
         public DateTime? SnoozeEndTime { get; set; }
+        public bool IsOtpExpired { get; set; }
     }
 }

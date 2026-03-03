@@ -157,7 +157,7 @@ public class SafetyLinkController : ControllerBase
             existingLink.EnableSafety = dto.EnableSafety;
             existingLink.EnableSecurity = dto.EnableSecurity;
             existingLink.OTP = GenerateOTP();
-            existingLink.OTPExpiry = DateTime.UtcNow.AddMinutes(30);
+            existingLink.OTPExpiry = DateTime.UtcNow.AddHours(48);
             existingLink.UpdatedAt = DateTime.UtcNow;
 
             _safetyLinkRepo.Update(existingLink);
@@ -444,7 +444,8 @@ public class SafetyLinkController : ControllerBase
                 EnableSecurity = l.EnableSecurity,
                 Snooze = l.Snooze,
                 SnoozeStartTime = l.SnoozeStartTime,
-                SnoozeEndTime = l.SnoozeEndTime
+                SnoozeEndTime = l.SnoozeEndTime,
+                IsOtpExpired = l.Status == SafetyLinkStatus.Pending && l.OTPExpiry < DateTime.UtcNow
             }).ToListAsync();
 
         var inbound = await _safetyLinkRepo.Query().Where(l => l.RecipientId == userId)
@@ -459,7 +460,8 @@ public class SafetyLinkController : ControllerBase
                 EnableSecurity = l.EnableSecurity,
                 Snooze = l.Snooze,
                 SnoozeStartTime = l.SnoozeStartTime,
-                SnoozeEndTime = l.SnoozeEndTime
+                SnoozeEndTime = l.SnoozeEndTime,
+                IsOtpExpired = l.Status == SafetyLinkStatus.Pending && l.OTPExpiry < DateTime.UtcNow
             }).ToListAsync();
 
         return Ok(new ApiResponse(true, "Linked members retrieved")
@@ -470,17 +472,24 @@ public class SafetyLinkController : ControllerBase
     }
 
     [HttpDelete("delete-linked/{linkId:guid}")]
-    [SwaggerOperation(Summary = "Delete Linked Member", Description = "Deletes an outbound link.")]
-    [SwaggerResponse(200, "Deleted")]
+    [SwaggerOperation(
+    Summary = "Delete Linked Member",
+    Description = "Deletes a SafetyLink entry regardless of status."
+)]
+    [SwaggerResponse(200, "Linked member deleted")]
     [SwaggerResponse(404, "Link not found")]
     public async Task<ActionResult<ApiResponse>> DeleteLinkedMember(Guid linkId)
     {
-        var senderId = User.GetUserId();
-        var link = await _safetyLinkRepo.Query().FirstOrDefaultAsync(l => l.Id == linkId && l.SenderId == senderId && l.Status == SafetyLinkStatus.Accepted);
-        if (link == null) return NotFound(new ApiResponse(false, "Linked member not found")
-        {
-            ErrorCode = "OC-048"
-        });
+        var userId = User.GetUserId();
+
+        var link = await _safetyLinkRepo.Query()
+            .FirstOrDefaultAsync(l => l.Id == linkId && (l.SenderId == userId || l.RecipientId == userId));
+
+        if (link == null)
+            return NotFound(new ApiResponse(false, "Link not found")
+            {
+                ErrorCode = "OC-048"
+            });
 
         _safetyLinkRepo.Delete(link);
         await _safetyLinkRepo.SaveAsync();
