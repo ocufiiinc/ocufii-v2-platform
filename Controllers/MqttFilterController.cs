@@ -34,160 +34,144 @@ namespace OcufiiAPI.Controllers
         }
 
         [HttpPost("apply-gateway-filter")]
-        public async Task<IActionResult> ApplyGatewayFilterWithAcknowledgement([FromBody] TestGatewayFilterRequest request)
+        public async Task<IActionResult> ApplyGatewayFilterWithAcknowledgement([FromBody] ApplyGatewayFilterRequest request)
         {
-            // Get user ID from JWT token
             var userId = User.GetUserId();
 
-            // Hard-coded configuration values
             const int relationshipRule = 1;
             const int duplicateRule = 1;
             const int duplicateTime = 10;
 
-            var cleanMac = request.Mac.Replace(":", "").Replace("-", "").ToUpperInvariant();
             var allFlowAttempts = new List<object>();
 
             try
             {
-                switch (request.Type)
+                // Load DeviceType IDs from DB (gateway & beacon) for ID-based comparison
+                var gatewayType = await _db.DeviceTypes.FirstOrDefaultAsync(t => t.Key == "gateway");
+                var beaconType  = await _db.DeviceTypes.FirstOrDefaultAsync(t => t.Key == "beacon");
+
+                if (gatewayType == null || beaconType == null)
                 {
-                    case DeviceTypeEnum.Gateway:
-                        {
-                            // Gateway registration - verify gateway exists and belongs to logged-in user
-                            var gatewayDevice = await _db.Devices
-                                .Include(d => d.DeviceType)
-                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "gateway" && d.IsDeleted == false);
+                    return Ok(new
+                    {
+                        success = false,
+                        message = "DeviceType configuration is missing in the database"
+                    });
+                }
 
-                            if (gatewayDevice == null)
-                            {
-                                return Ok(new
-                                {
-                                    success = false,
-                                    message = $"Gateway with MAC {cleanMac} not found in database"
-                                });
-                            }
+                // Look up device by ID — no Include needed, DeviceTypeId is a direct FK column
+                var device = await _db.Devices
+                    .FirstOrDefaultAsync(d => d.Id == request.DeviceId && d.IsDeleted == false);
 
-                            // Verify gateway belongs to logged-in user
-                            if (gatewayDevice.UserId != userId)
-                            {
-                                return Forbid();
-                            }
+                if (device == null)
+                {
+                    return Ok(new
+                    {
+                        success = false,
+                        message = $"Device with ID {request.DeviceId} not found"
+                    });
+                }
 
-                            // Find all beacons for logged-in user
-                            var beaconDevices = await _db.Devices
-                                .Include(d => d.DeviceType)
-                                .Where(d => d.UserId == userId && d.DeviceType.Key == "beacon" && d.IsDeleted == false)
-                                .ToListAsync();
+                // Verify device belongs to the logged-in user
+                if (device.UserId != userId)
+                {
+                    return Forbid();
+                }
 
-                            var beaconMacs = beaconDevices
-                                .Select(b => b.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant())
-                                .ToArray();
+                var cleanMac = device.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
 
-                            // Execute gateway registration flow (Steps 1, 2, 3)
-                            var result = await ExecuteGatewayFlow(
-                                gatewayMac: cleanMac,
-                                beaconMacs: beaconMacs,
-                                relationshipRule: relationshipRule,
-                                duplicateRule: duplicateRule,
-                                duplicateTime: duplicateTime,
-                                allFlowAttempts: allFlowAttempts
-                            );
+                // Branch based on DeviceTypeId (FK column) — no string Key comparison
+                if (device.DeviceTypeId == gatewayType.Id)
+                {
+                    // ── GATEWAY FLOW ──────────────────────────────────────────
+                    // Find all beacons for logged-in user using beacon DeviceTypeId
+                    var beaconDevices = await _db.Devices
+                        .Where(d => d.UserId == userId && d.DeviceTypeId == beaconType.Id && d.IsDeleted == false)
+                        .ToListAsync();
 
-                            return result;
-                        }
+                    var beaconMacs = beaconDevices
+                        .Select(b => b.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant())
+                        .ToArray();
 
-                    case DeviceTypeEnum.Beacon:
-                        {
-                            // Beacon addition - verify beacon exists and belongs to logged-in user
-                            var beaconDevice = await _db.Devices
-                                .Include(d => d.DeviceType)
-                                .FirstOrDefaultAsync(d => d.MacAddress == cleanMac && d.DeviceType.Key == "beacon" && d.IsDeleted == false);
+                    // Execute gateway registration flow (Steps 1, 2, 3)
+                    var result = await ExecuteGatewayFlow(
+                        gatewayMac: cleanMac,
+                        beaconMacs: beaconMacs,
+                        relationshipRule: relationshipRule,
+                        userId: device.UserId!.ToString(),
+                        deviceId: device.Id.ToString(),
+                        duplicateRule: duplicateRule,
+                        duplicateTime: duplicateTime,
+                        allFlowAttempts: allFlowAttempts
+                    );
 
-                            if (beaconDevice == null)
-                            {
-                                return Ok(new
-                                {
-                                    success = false,
-                                    message = $"Beacon with MAC {cleanMac} not found in database"
-                                });
-                            }
+                    return Ok(result);
+                }
+                else if (device.DeviceTypeId == beaconType.Id)
+                {
+                    // ── BEACON FLOW ───────────────────────────────────────────
+                    // Find all gateways for logged-in user using gateway DeviceTypeId
+                    var gatewayDevices = await _db.Devices
+                        .Where(d => d.UserId == userId && d.DeviceTypeId == gatewayType.Id && d.IsDeleted == false)
+                        .ToListAsync();
 
-                            // Verify beacon belongs to logged-in user
-                            if (beaconDevice.UserId != userId)
-                            {
-                                return Forbid();
-                            }
-
-                            // Find all gateways for logged-in user
-                            var gatewayDevices = await _db.Devices
-                                .Include(d => d.DeviceType)
-                                .Where(d => d.UserId == userId && d.DeviceType.Key == "gateway" && d.IsDeleted == false)
-                                .ToListAsync();
-
-                            if (gatewayDevices.Count == 0)
-                            {
-                                return Ok(new
-                                {
-                                    success = false,
-                                    message = "No gateways found for this beacon"
-                                });
-                            }
-
-                            var gatewayResults = new List<object>();
-
-                            // For each gateway, execute Step 3 with all beacons for logged-in user
-                            foreach (var gateway in gatewayDevices)
-                            {
-                                var gatewayMac = gateway.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
-
-                                // Find all beacons for logged-in user
-                                var beaconsForUser = await _db.Devices
-                                    .Include(d => d.DeviceType)
-                                    .Where(d => d.UserId == userId && d.DeviceType.Key == "beacon" && d.IsDeleted == false)
-                                    .ToListAsync();
-
-                                var beaconMacs = beaconsForUser
-                                    .Select(b => b.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant())
-                                    .ToArray();
-
-                                // Execute only Step 3 for this gateway
-                                var result = await ExecuteBeaconAddFlow(
-                                    gatewayMac: gatewayMac,
-                                    beaconMacs: beaconMacs,
-                                    allFlowAttempts: allFlowAttempts
-                                );
-
-                                gatewayResults.Add(new
-                                {
-                                    gateway = gatewayMac,
-                                    result
-                                });
-                            }
-
-                            return Ok(new
-                            {
-                                success = true,
-                                message = $"Beacon added to {gatewayDevices.Count} gateway(s)",
-                                beaconMac = cleanMac,
-                                gatewayResults
-                            });
-                        }
-
-                    case DeviceTypeEnum.SafetyCard:
-                        // Safety card handling - to be implemented
+                    if (gatewayDevices.Count == 0)
+                    {
                         return Ok(new
                         {
                             success = false,
-                            message = "SafetyCard handling is not yet implemented"
+                            message = "No gateways found for this user"
                         });
+                    }
 
-                    default:
-                        return BadRequest(new
+                    // Load all user beacons once (used for whitelist on every gateway)
+                    var allUserBeaconMacs = await _db.Devices
+                        .Where(d => d.UserId == userId && d.DeviceTypeId == beaconType.Id && d.IsDeleted == false)
+                        .Select(b => b.MacAddress.Replace(":", "").Replace("-", "").ToUpper())
+                        .ToArrayAsync();
+
+                    var gatewayResults = new List<object>();
+
+                    // For each gateway, push updated beacon whitelist (msg_id=1028 only)
+                    // using that gateway's own MQTT topic (iot/stg/{userId}/gw/{deviceId}/down)
+                    foreach (var gateway in gatewayDevices)
+                    {
+                        var gatewayMac = gateway.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
+                        var gatewayFlowAttempts = new List<object>();
+
+                        var result = await ExecuteBeaconAddFlow(
+                            gatewayMac: gatewayMac,
+                            userId: gateway.UserId!.ToString(),
+                            deviceId: gateway.Id.ToString(),
+                            beaconMacs: allUserBeaconMacs,
+                            allFlowAttempts: gatewayFlowAttempts
+                        );
+
+                        gatewayResults.Add(new
                         {
-                            success = false,
-                            message = "Invalid device type specified"
+                            gatewayId = gateway.Id,
+                            gatewayMac,
+                            result
                         });
+                    }
+
+                    return Ok(new
+                    {
+                        success = true,
+                        message = $"Beacon whitelist pushed to {gatewayDevices.Count} gateway(s)",
+                        beaconMac = cleanMac,
+                        gatewayResults
+                    });
                 }
+                else
+                {
+                    return Ok(new
+                    {
+                        success = false,
+                        message = $"Device type with ID {device.DeviceTypeId} is not supported by this endpoint"
+                    });
+                }
+
             }
             catch (Exception ex)
             {
@@ -202,17 +186,18 @@ namespace OcufiiAPI.Controllers
             }
         }
 
-        private async Task<IActionResult> ExecuteGatewayFlow(
+        private async Task<object> ExecuteGatewayFlow(
             string gatewayMac,
             string[] beaconMacs,
             int relationshipRule,
+            string userId,
+            string deviceId,
             int duplicateRule,
             int duplicateTime,
             List<object> allFlowAttempts)
         {
-            var deviceId = $"test{gatewayMac}";
-            var publishTopic = $"MINI-02-58B6/{deviceId}/app_to_device";
-            var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
+            var publishTopic = $"iot/stg/{userId}/gw/{deviceId}/down";
+            var subscribeTopic = $"iot/stg/{userId}/gw/{deviceId}/up";
 
             var steps = new List<object>();
             var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
@@ -265,7 +250,7 @@ namespace OcufiiAPI.Controllers
                         var clientOptions = new MqttClientOptionsBuilder()
                             .WithTcpServer(_mqttConfig.Host, _mqttConfig.Port)
                             .WithCredentials(_mqttConfig.Username, _mqttConfig.Password)
-                            .WithClientId($"api-test-{Guid.NewGuid()}")
+                            .WithClientId($"api-stg-{Guid.NewGuid()}")
                             .WithTlsOptions(o =>
                             {
                                 o.UseTls(_mqttConfig.UseTls);
@@ -356,7 +341,7 @@ namespace OcufiiAPI.Controllers
                         var step1Payload = new
                         {
                             msg_id = 1025,
-                            device_info = new { device_id = deviceId, mac = gatewayMac },
+                            device_info = new { device_id = gatewayMac, mac = gatewayMac },
                             data = new { rule = relationshipRule }
                         };
                         var step1Result = await PublishAndWaitForAck(1025, step1Payload, "1 - Relationship Filter");
@@ -375,7 +360,7 @@ namespace OcufiiAPI.Controllers
                                 continue;
                             }
 
-                            return Ok(new
+                            return (object)new
                             {
                                 success = false,
                                 message = $"Step 1 (msg_id=1025) failed after {maxFlowRetries} flow attempts",
@@ -384,7 +369,7 @@ namespace OcufiiAPI.Controllers
                                 publishTopic,
                                 subscribeTopic,
                                 flowAttempts = allFlowAttempts
-                            });
+                            };
                         }
 
                         await Task.Delay(500);
@@ -393,7 +378,7 @@ namespace OcufiiAPI.Controllers
                         var step2Payload = new
                         {
                             msg_id = 1010,
-                            device_info = new { device_id = deviceId, mac = gatewayMac },
+                            device_info = new { device_id = gatewayMac, mac = gatewayMac },
                             data = new { rule = duplicateRule, time = duplicateTime }
                         };
                         var step2Result = await PublishAndWaitForAck(1010, step2Payload, "2 - Duplicate Filter");
@@ -412,7 +397,7 @@ namespace OcufiiAPI.Controllers
                                 continue;
                             }
 
-                            return Ok(new
+                            return (object)new
                             {
                                 success = false,
                                 message = $"Step 2 (msg_id=1010) failed after {maxFlowRetries} flow attempts",
@@ -421,7 +406,7 @@ namespace OcufiiAPI.Controllers
                                 publishTopic,
                                 subscribeTopic,
                                 flowAttempts = allFlowAttempts
-                            });
+                            };
                         }
 
                         await Task.Delay(500);
@@ -454,7 +439,7 @@ namespace OcufiiAPI.Controllers
                         var step3Payload = new
                         {
                             msg_id = 1028,
-                            device_info = new { device_id = deviceId, mac = gatewayMac },
+                            device_info = new { device_id = gatewayMac, mac = gatewayMac },
                             data = step3Data
                         };
                         var step3Result = await PublishAndWaitForAck(1028, step3Payload, "3 - MAC Filter");
@@ -473,7 +458,7 @@ namespace OcufiiAPI.Controllers
                                 continue;
                             }
 
-                            return Ok(new
+                            return (object)new
                             {
                                 success = false,
                                 message = $"Step 3 (msg_id=1028) failed after {maxFlowRetries} flow attempts",
@@ -482,7 +467,7 @@ namespace OcufiiAPI.Controllers
                                 publishTopic,
                                 subscribeTopic,
                                 flowAttempts = allFlowAttempts
-                            });
+                            };
                         }
 
                         await mqttClient.DisconnectAsync();
@@ -490,7 +475,7 @@ namespace OcufiiAPI.Controllers
 
                         allFlowAttempts.Add(new { attempt = flowAttempt, steps, receivedMessages });
 
-                        return Ok(new
+                        return (object)new
                         {
                             success = true,
                             message = "✅ Gateway registered successfully! All 3 steps completed with acknowledgements.",
@@ -504,7 +489,7 @@ namespace OcufiiAPI.Controllers
                             steps,
                             receivedMessages,
                             allFlowAttempts
-                        });
+                        };
                     }
                     catch (Exception innerEx)
                     {
@@ -526,12 +511,12 @@ namespace OcufiiAPI.Controllers
                     }
                 }
 
-                return Ok(new
+                return (object)new
                 {
                     success = false,
                     message = "Unexpected end of flow",
                     flowAttempts = allFlowAttempts
-                });
+                };
             }
             finally
             {
@@ -544,12 +529,13 @@ namespace OcufiiAPI.Controllers
 
         private async Task<object> ExecuteBeaconAddFlow(
             string gatewayMac,
+            string userId,
+            string deviceId,
             string[] beaconMacs,
             List<object> allFlowAttempts)
         {
-            var deviceId = $"test{gatewayMac}";
-            var publishTopic = $"MINI-02-58B6/{deviceId}/app_to_device";
-            var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
+            var publishTopic = $"iot/stg/{userId}/gw/{deviceId}/down";
+            var subscribeTopic = $"iot/stg/{userId}/gw/{deviceId}/up";
 
             var steps = new List<object>();
             var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
@@ -716,7 +702,7 @@ namespace OcufiiAPI.Controllers
                         var step3Payload = new
                         {
                             msg_id = 1028,
-                            device_info = new { device_id = deviceId, mac = gatewayMac },
+                            device_info = new { device_id = gatewayMac, mac = gatewayMac },
                             data = step3Data
                         };
                         var step3Result = await PublishAndWaitForAck(1028, step3Payload, "3 - MAC Filter");
@@ -802,5 +788,11 @@ namespace OcufiiAPI.Controllers
                 }
             }
         }
+    }
+
+    public class ApplyGatewayFilterRequest
+    {
+        /// <summary>The database ID of the device (gateway or beacon).</summary>
+        public Guid DeviceId { get; set; }
     }
 }
