@@ -1,11 +1,14 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using BCrypt.Net;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
 using OcufiiAPI.DTO;
 using OcufiiAPI.Enums;
+using OcufiiAPI.Extensions;
 using OcufiiAPI.Models;
+using OcufiiAPI.Services;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
 
@@ -13,7 +16,6 @@ namespace OcufiiAPI.Controllers;
 
 [ApiController]
 [Route("admin")]
-[Authorize(Roles = "super_admin,tenant_admin")]
 [Produces("application/json")]
 [ProducesResponseType(typeof(ApiResponse), 200)]
 [ProducesResponseType(typeof(ApiResponse), 400)]
@@ -21,523 +23,289 @@ namespace OcufiiAPI.Controllers;
 [ProducesResponseType(typeof(ApiResponse), 403)]
 [ProducesResponseType(typeof(ApiResponse), 404)]
 [ProducesResponseType(typeof(ApiResponse), 409)]
-[ProducesResponseType(typeof(ApiResponse), 500)]
 public class AdminController : ControllerBase
 {
     private readonly OcufiiDbContext _db;
-    private readonly PasswordHasher<User> _hasher = new();
+    private readonly PermissionService _permissionService;
+    private readonly PasswordHasher<PlatformAdmin> _hasher = new();
+    private readonly PasswordHasher<Reseller> _hasherReseller = new();
 
-    public AdminController(OcufiiDbContext db)
+    public AdminController(OcufiiDbContext db, PermissionService permissionService)
     {
         _db = db;
+        _permissionService = permissionService;
     }
 
-    [HttpGet("tenants")]
-    [Authorize(Roles = "super_admin")]
-    [SwaggerOperation(Summary = "List All Tenants", Description = "Retrieves all tenants with user and admin counts. Super admin only.")]
-    [SwaggerResponse(200, "Tenants retrieved", typeof(ApiResponse))]
-    public async Task<ActionResult<ApiResponse>> ListTenants()
+    private Guid GetCurrentAdminId() => Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+
+    // ────────────────────────────────────────────────
+    // PLATFORM USERS MANAGEMENT
+    // ────────────────────────────────────────────────
+
+    [Authorize]
+    [HttpGet("platform-users")]
+    public async Task<ActionResult<ApiResponse>> ListPlatformUsers()
     {
-        var tenants = await _db.Tenants
-            .Include(t => t.Users)
-                .ThenInclude(u => u.Role)
-            .Select(t => new
-            {
-                t.ResellerId,
-                t.AssignedResellerId,
-                t.DateCreated,
-                t.DateUpdated,
-                t.ThemeConfig,
-                t.CustomWorkflows,
-                userCount = t.Users.Count,
-                adminCount = t.Users.Count(u => u.Role.RoleName == "tenant_admin" || u.Role.RoleName == "super_admin"),
-                users = t.Users.Select(u => new
-                {
-                    u.UserId,
-                    u.Email,
-                    u.FirstName,
-                    u.LastName,
-                    u.PhoneNumber,
-                    u.Company,
-                    u.IsEnabled,
-                    role = u.Role.RoleName,
-                    u.AccountType,
-                    u.ParentId
-                }).ToList()
-            })
-            .ToListAsync();
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.OnlyView))
+            return BadRequest(new ApiResponse(false, "You do not have permission to view platform users") { ErrorCode = "OC-077" });
 
-        return Ok(new ApiResponse(true, "Tenants retrieved successfully")
-        {
-            Data = tenants,
-            ErrorCode = null
-        });
-    }
-
-    [HttpPost("tenants")]
-    [Authorize(Roles = "super_admin")]
-    [SwaggerOperation(Summary = "Create New Tenant", Description = "Creates a new tenant. Super admin only. AssignedResellerId defaults to Ocufii Direct if not provided.")]
-    [SwaggerResponse(201, "Tenant created", typeof(ApiResponse))]
-    public async Task<ActionResult<ApiResponse>> CreateTenant([FromBody] CreateTenantRequest request)
-    {
-        if (request == null)
-            return BadRequest(new ApiResponse(false, "Invalid request body")
-            {
-                ErrorCode = "OC-001"  // Invalid request body
-            });
-
-        var defaultResellerId = new Guid("00000000-0000-0000-0000-000000000001");
-        var tenant = new Tenant
-        {
-            ResellerId = Guid.NewGuid(),
-            AssignedResellerId = request.AssignedResellerId ?? defaultResellerId,
-            DateCreated = DateTime.UtcNow,
-            DateUpdated = DateTime.UtcNow,
-            ThemeConfig = request.ThemeConfig ?? "{}",
-            CustomWorkflows = request.CustomWorkflows ?? "[]"
-        };
-
-        _db.Tenants.Add(tenant);
-        await _db.SaveChangesAsync();
-
-        return Created($"/admin/tenants/{tenant.ResellerId}", new ApiResponse(true, "Tenant created successfully")
-        {
-            Data = new { tenant.ResellerId, tenant.AssignedResellerId, tenant.DateCreated },
-            ErrorCode = null
-        });
-    }
-
-    [HttpGet("users")]
-    [SwaggerOperation(Summary = "List Users", Description = "Lists users - full access for super admin, tenant-scoped for tenant admin")]
-    [SwaggerResponse(200, "Users retrieved", typeof(ApiResponse))]
-    public async Task<ActionResult<ApiResponse>> ListUsers()
-    {
-        var currentUserId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var currentUser = await _db.Users.FirstOrDefaultAsync(u => u.UserId == currentUserId);
-        if (currentUser == null)
-            return NotFound(new ApiResponse(false, "Current user not found")
-            {
-                ErrorCode = "OC-002"  // Current user not found
-            });
-
-        var isSuperAdmin = User.IsInRole("super_admin");
-        var query = _db.Users.Where(u => !u.IsDeleted);
-        if (!isSuperAdmin)
-            query = query.Where(u => u.TenantId == currentUser.TenantId);
-
-        var users = await query
+        var users = await _db.PlatformAdmins
             .Select(u => new
             {
-                u.UserId,
+                u.AdminId,
                 u.Email,
                 u.FirstName,
                 u.LastName,
-                u.PhoneNumber,
-                u.Company,
-                u.IsEnabled,
-                u.TenantId,
-                u.RoleId,
-                ParentId = u.ParentId ?? u.UserId
+                u.Role,
+                u.IsActive,
+                u.CreatedAt,
+                u.LastLogin
             })
             .ToListAsync();
 
-        return Ok(new ApiResponse(true, "Users retrieved successfully")
+        return Ok(new ApiResponse(true, "Platform users retrieved")
         {
             Data = users,
             ErrorCode = null
         });
     }
 
-    [HttpPost("users")]
-    [SwaggerOperation(Summary = "Create User", Description = "Creates a new user in the tenant")]
-    [SwaggerResponse(201, "User created", typeof(ApiResponse))]
-    [SwaggerResponse(400, "Invalid request")]
-    public async Task<ActionResult<ApiResponse>> CreateUser([FromBody] CreateUserRequest request)
+    [Authorize]
+    [HttpPost("platform-users")]
+    public async Task<ActionResult<ApiResponse>> CreatePlatformUser([FromBody] CreatePlatformUserDto dto)
     {
-        var currentUserId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var currentUser = await _db.Users.Include(u => u.Tenant).FirstOrDefaultAsync(u => u.UserId == currentUserId);
-        if (currentUser == null)
-            return NotFound(new ApiResponse(false, "Current user not found")
-            {
-                ErrorCode = "OC-002"  // Current user not found
-            });
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.CanCreate))
+            return BadRequest(new ApiResponse(false, "You do not have permission to create platform users") { ErrorCode = "OC-077" });
 
-        var isSuperAdmin = User.IsInRole("super_admin");
-        Guid tenantId;
-        Guid? assignedResellerId;
+        if (string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.FirstName))
+            return BadRequest(new ApiResponse(false, "Email and FirstName are required") { ErrorCode = "OC-056" });
 
-        if (isSuperAdmin)
+        var existing = await _db.PlatformAdmins.AnyAsync(u => u.Email == dto.Email);
+        if (existing)
+            return Conflict(new ApiResponse(false, "Email already in use") { ErrorCode = "OC-057" });
+
+        var tempPassword = Guid.NewGuid().ToString("N").Substring(0, 12);
+        var hash = _hasher.HashPassword(null!, tempPassword);
+
+        var user = new PlatformAdmin
         {
-            if (request.TenantId == null)
-                return BadRequest(new ApiResponse(false, "TenantId required for super admin")
+            AdminId = Guid.NewGuid(),
+            Email = dto.Email,
+            FirstName = dto.FirstName,
+            LastName = dto.LastName ?? "",
+            PasswordHash = hash,
+            Role = dto.Role ?? "CanView",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.PlatformAdmins.Add(user);
+        await _db.SaveChangesAsync();
+
+        // Auto-assign FullAccess if role is Administrator - Full Access
+        if (user.Role == "Administrator - Full Access")
+        {
+            var allFeatures = await _db.Features.ToListAsync();
+            foreach (var f in allFeatures)
+            {
+                _db.PlatformAdminFeatures.Add(new PlatformAdminFeature
                 {
-                    ErrorCode = "OC-003"  // TenantId required
+                    AdminId = user.AdminId,
+                    FeatureId = f.Id,
+                    IsEnabled = true,
+                    Right = FeatureRight.FullAccess,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        else if (dto.Features != null && dto.Features.Any())
+        {
+            foreach (var f in dto.Features)
+            {
+                _db.PlatformAdminFeatures.Add(new PlatformAdminFeature
+                {
+                    AdminId = user.AdminId,
+                    FeatureId = f.FeatureId,
+                    IsEnabled = f.IsEnabled,
+                    Right = (FeatureRight)f.Right,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync();
+
+        return Created($"/admin/platform-users/{user.AdminId}", new ApiResponse(true, "Platform user created")
+        {
+            Data = new { user.AdminId, user.Email, TemporaryPassword = tempPassword },
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("platform-users/{adminId:guid}/status")]
+    public async Task<ActionResult<ApiResponse>> UpdatePlatformUserStatus(Guid adminId, [FromBody] AdminUpdateStatusDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update platform user status") { ErrorCode = "OC-077" });
+
+        var user = await _db.PlatformAdmins.FindAsync(adminId);
+        if (user == null)
+            return NotFound(new ApiResponse(false, "Platform user not found") { ErrorCode = "OC-058" });
+
+        if (user.Email.Equals("superadmin@ocufii.com", StringComparison.OrdinalIgnoreCase) && !dto.IsActive)
+            return BadRequest(new ApiResponse(false, "Default super admin cannot be deactivated") { ErrorCode = "OC-066" });
+
+        user.IsActive = dto.IsActive;
+        user.UpdatedAt = DateTime.UtcNow;
+        _db.PlatformAdmins.Update(user);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, $"Platform user {(dto.IsActive ? "activated" : "deactivated")}")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("platform-users/{adminId:guid}/role")]
+    public async Task<ActionResult<ApiResponse>> UpdatePlatformUserRole(Guid adminId, [FromBody] UpdateRoleDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update platform user roles") { ErrorCode = "OC-077" });
+
+        var user = await _db.PlatformAdmins.FindAsync(adminId);
+        if (user == null)
+            return NotFound(new ApiResponse(false, "Platform user not found") { ErrorCode = "OC-058" });
+
+        var validRoles = new[] { "Administrator - Full Access", "CanView", "CanEdit", "CanDelete", "CanCreate" };
+        if (!validRoles.Contains(dto.Role))
+            return BadRequest(new ApiResponse(false, $"Invalid role. Allowed: {string.Join(", ", validRoles)}") { ErrorCode = "OC-065" });
+
+        user.Role = dto.Role;
+        user.UpdatedAt = DateTime.UtcNow;
+        _db.PlatformAdmins.Update(user);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, $"Role updated to {dto.Role}")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpDelete("platform-users/{adminId:guid}")]
+    public async Task<ActionResult<ApiResponse>> DeletePlatformUser(Guid adminId)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.CanDelete))
+            return BadRequest(new ApiResponse(false, "You do not have permission to delete platform users") { ErrorCode = "OC-077" });
+
+        var user = await _db.PlatformAdmins.FindAsync(adminId);
+        if (user == null)
+            return NotFound(new ApiResponse(false, "Platform user not found") { ErrorCode = "OC-058" });
+
+        if (user.Email.Equals("superadmin@ocufii.com", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new ApiResponse(false, "Default super admin cannot be deleted") { ErrorCode = "OC-066" });
+
+        _db.PlatformAdmins.Remove(user);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Platform user permanently deleted")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("me/password")]
+    public async Task<ActionResult<ApiResponse>> UpdateOwnPassword([FromBody] ChangePasswordDto dto)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim))
+            return Unauthorized(new ApiResponse(false, "User ID not found in token") { ErrorCode = "OC-074" });
+
+        var isPlatform = User.HasClaim("user_type", "platform");
+
+        if (isPlatform)
+        {
+            var adminId = Guid.Parse(userIdClaim);
+            var admin = await _db.PlatformAdmins.FindAsync(adminId);
+            if (admin == null)
+                return NotFound(new ApiResponse(false, "Platform admin not found") { ErrorCode = "OC-058" });
+
+            if (admin.Email.Equals("superadmin@ocufii.com", StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new ApiResponse(false, "Default super admin password cannot be changed via API") { ErrorCode = "OC-071" });
+
+            var verify = _hasher.VerifyHashedPassword(admin!, admin.PasswordHash, dto.CurrentPassword);
+            if (verify == PasswordVerificationResult.Failed)
+                return BadRequest(new ApiResponse(false, "Current password is incorrect")
+                {
+                    ErrorCode = "OC-010"
                 });
 
-            tenantId = request.TenantId.Value;
-            var chosenTenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId);
-            if (chosenTenant == null)
-                return NotFound(new ApiResponse(false, "Tenant not found")
-                {
-                    ErrorCode = "OC-004"  // Tenant not found
-                });
-
-            assignedResellerId = request.AssignedResellerId ?? chosenTenant.AssignedResellerId;
+           
+            admin.PasswordHash = _hasher.HashPassword(admin, dto.NewPassword);
+            admin.UpdatedAt = DateTime.UtcNow;
+            _db.PlatformAdmins.Update(admin);
         }
         else
         {
-            tenantId = currentUser.TenantId!.Value;
-            assignedResellerId = currentUser.Tenant!.AssignedResellerId;
+            var resellerId = Guid.Parse(userIdClaim);
+            var reseller = await _db.Resellers.FindAsync(resellerId);
+            if (reseller == null)
+                return NotFound(new ApiResponse(false, "Reseller not found") { ErrorCode = "OC-061" });
+
+            var verify = _hasherReseller.VerifyHashedPassword(reseller!, reseller.PasswordHash, dto.CurrentPassword);
+            if (verify == PasswordVerificationResult.Failed)
+                return BadRequest(new ApiResponse(false, "Current password is incorrect")
+                {
+                    ErrorCode = "OC-010"
+                });
+
+            if (!BCrypt.Net.BCrypt.Verify(dto.CurrentPassword, reseller.PasswordHash))
+                return BadRequest(new ApiResponse(false, "Current password incorrect") { ErrorCode = "OC-010" });
+
+            reseller.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+            reseller.UpdatedAt = DateTime.UtcNow;
+            _db.Resellers.Update(reseller);
         }
 
-        var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == request.Role);
-        if (role == null)
-            return BadRequest(new ApiResponse(false, "Invalid role")
-            {
-                ErrorCode = "OC-005"  // Invalid role
-            });
-
-        var newUser = new User
-        {
-            UserId = Guid.NewGuid(),
-            Email = request.Email,
-            FirstName = request.FirstName,
-            LastName = request.LastName,
-            PhoneNumber = request.PhoneNumber,
-            Company = request.Company,
-            Password = _hasher.HashPassword(null!, "TempPass@2025!"),
-            RoleId = role.RoleId,
-            TenantId = tenantId,
-            ParentId = currentUser.UserId,
-            IsEnabled = true,
-            IsDeleted = false,
-            DateSubmitted = DateTime.UtcNow,
-            DateUpdated = DateTime.UtcNow
-        };
-
-        _db.Users.Add(newUser);
         await _db.SaveChangesAsync();
 
-        // Auto-assign Free plan
-        var freePlan = new SubscriptionPlan
-        {
-            UserId = newUser.UserId,
-            PlanType = SubscriptionPlanType.Free,
-            MaxActiveLinks = 1,
-            IsActive = true,
-            ExpiryDate = DateTime.UtcNow.AddYears(10),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _db.SubscriptionPlans.Add(freePlan);
-        await _db.SaveChangesAsync();
-
-        return Created($"/admin/users/{newUser.UserId}", new ApiResponse(true, "User created successfully")
-        {
-            Data = new { newUser.UserId, newUser.Email },
-            ErrorCode = null
-        });
-    }
-
-    [HttpPost("users/{id:guid}/dependents")]
-    [SwaggerOperation(Summary = "Create Dependent User", Description = "Creates a dependent user for the specified parent")]
-    [SwaggerResponse(201, "Dependent created")]
-    [SwaggerResponse(400, "Invalid request")]
-    public async Task<ActionResult<ApiResponse>> CreateDependent(Guid id, [FromBody] CreateDependentRequest request)
-    {
-        var parent = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id && !u.IsDeleted);
-        if (parent == null)
-            return NotFound(new ApiResponse(false, "Parent user not found")
-            {
-                ErrorCode = "OC-006"  // Parent user not found
-            });
-
-        var roleName = string.IsNullOrEmpty(request.Role) ? "viewer" : request.Role;
-        var userRole = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
-        if (userRole == null)
-            return BadRequest(new ApiResponse(false, $"Role '{roleName}' not found")
-            {
-                ErrorCode = "OC-005"  // Invalid role
-            });
-
-        var dependent = new User
-        {
-            UserId = Guid.NewGuid(),
-            Email = request.Email,
-            FirstName = request.FirstName,
-            LastName = request.LastName,
-            PhoneNumber = request.PhoneNumber,
-            Company = request.Company ?? parent.Company,
-            Username = request.Email.Split('@')[0],
-            Password = _hasher.HashPassword(null!, "TempPass@2025!"),
-            RoleId = userRole.RoleId,
-            TenantId = parent.TenantId,
-            ParentId = parent.UserId,
-            IsEnabled = true,
-            IsDeleted = false,
-            DateSubmitted = DateTime.UtcNow,
-            DateUpdated = DateTime.UtcNow
-        };
-
-        _db.Users.Add(dependent);
-        await _db.SaveChangesAsync();
-
-        var freePlan = new SubscriptionPlan
-        {
-            UserId = dependent.UserId,
-            PlanType = SubscriptionPlanType.Free,
-            MaxActiveLinks = 1,
-            IsActive = true,
-            ExpiryDate = DateTime.UtcNow.AddYears(10),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _db.SubscriptionPlans.Add(freePlan);
-        await _db.SaveChangesAsync();
-
-        return Created($"/admin/users/{dependent.UserId}", new ApiResponse(true, "Dependent created successfully")
-        {
-            Data = new { dependent.UserId, dependent.Email },
-            ErrorCode = null
-        });
-    }
-
-    [HttpGet("users/{id:guid}/features")]
-    [SwaggerOperation(Summary = "Get User Features", Description = "Returns all features assigned to the user")]
-    [SwaggerResponse(200, "Features retrieved")]
-    [SwaggerResponse(404, "User not found")]
-    public async Task<ActionResult<ApiResponse>> GetUserFeatures(Guid id)
-    {
-        var user = await _db.Users
-            .Include(u => u.UserFeatures)
-                .ThenInclude(uf => uf.Feature)
-            .FirstOrDefaultAsync(u => u.UserId == id);
-
-        if (user == null)
-            return NotFound(new ApiResponse(false, "User not found")
-            {
-                ErrorCode = "OC-007"  // User not found
-            });
-
-        if (user.ParentId == user.UserId || user.ParentId == null)
-            return BadRequest(new ApiResponse(false, "User is not a dependent")
-            {
-                ErrorCode = "OC-008"  // Not a dependent user
-            });
-
-        return Ok(new ApiResponse(true, "User features retrieved")
-        {
-            Data = user.UserFeatures.Select(uf => new
-            {
-                uf.FeatureId,
-                uf.IsEnabled,
-                uf.Right,
-                uf.Feature.Key,
-                uf.Feature.Name
-            }),
-            ErrorCode = null
-        });
-    }
-
-    [HttpGet("features")]
-    public async Task<ActionResult<ApiResponse>> ListFeatures()
-    {
-        var features = await _db.Features.ToListAsync();
-        return Ok(new ApiResponse(true, "Features retrieved successfully")
-        {
-            Data = features.Select(f => new
-            {
-                f.Id,
-                f.Key,
-                f.Name,
-                f.Description,
-                f.DeviceTypeId
-            }),
-            ErrorCode = null
-        });
-    }
-
-    [HttpPost("users/{id:guid}/features")]
-    [SwaggerOperation(Summary = "Assign Feature to User", Description = "Assigns a feature to a user with enabled/right settings")]
-    [SwaggerResponse(200, "Feature assigned")]
-    [SwaggerResponse(400, "Invalid request")]
-    [SwaggerResponse(404, "User or feature not found")]
-    public async Task<ActionResult<ApiResponse>> AssignFeature(Guid id, [FromBody] AssignFeatureRequest request)
-    {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == id && !u.IsDeleted);
-        if (user == null)
-            return NotFound(new ApiResponse(false, "User not found")
-            {
-                ErrorCode = "OC-007"  // User not found
-            });
-
-        var feature = await _db.Features.FirstOrDefaultAsync(f => f.Id == request.FeatureId);
-        if (feature == null)
-            return BadRequest(new ApiResponse(false, "Invalid feature")
-            {
-                ErrorCode = "OC-009"  // Invalid feature
-            });
-
-        var existing = await _db.UserFeatures.FirstOrDefaultAsync(uf => uf.UserId == id && uf.FeatureId == request.FeatureId);
-        if (existing != null)
-            return Conflict(new ApiResponse(false, "Feature already assigned")
-            {
-                ErrorCode = "OC-010"  // Feature already assigned
-            });
-
-        var userFeature = new UserFeature
-        {
-            UserId = user.UserId,
-            FeatureId = feature.Id,
-            IsEnabled = request.IsEnabled,
-            Right = request.Right,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _db.UserFeatures.Add(userFeature);
-        await _db.SaveChangesAsync();
-
-        return Ok(new ApiResponse(true, "Feature assigned successfully")
-        {
-            Data = new
-            {
-                userFeature.FeatureId,
-                userFeature.IsEnabled,
-                userFeature.Right
-            },
-            ErrorCode = null
-        });
-    }
-
-    [HttpPatch("users/{id:guid}/features/{featureId:guid}")]
-    [SwaggerOperation(Summary = "Update User Feature", Description = "Updates enabled/right settings for a feature assigned to user")]
-    [SwaggerResponse(200, "Feature updated")]
-    [SwaggerResponse(404, "User feature not found")]
-    public async Task<ActionResult<ApiResponse>> UpdateFeature(Guid id, Guid featureId, [FromBody] UpdateFeatureRequest request)
-    {
-        var userFeature = await _db.UserFeatures.FirstOrDefaultAsync(uf => uf.UserId == id && uf.FeatureId == featureId);
-        if (userFeature == null)
-            return NotFound(new ApiResponse(false, "User feature not found")
-            {
-                ErrorCode = "OC-011"  // User feature not found
-            });
-
-        userFeature.IsEnabled = request.IsEnabled;
-        userFeature.Right = request.Right;
-        userFeature.UpdatedAt = DateTime.UtcNow;
-
-        _db.UserFeatures.Update(userFeature);
-        await _db.SaveChangesAsync();
-
-        return Ok(new ApiResponse(true, "Feature updated successfully")
-        {
-            Data = new
-            {
-                userFeature.FeatureId,
-                userFeature.IsEnabled,
-                userFeature.Right
-            },
-            ErrorCode = null
-        });
-    }
-
-    [HttpDelete("users/{id:guid}/features/{featureId:guid}")]
-    [SwaggerOperation(Summary = "Remove User Feature", Description = "Removes a feature assignment from the user")]
-    [SwaggerResponse(200, "Feature removed")]
-    [SwaggerResponse(404, "User feature not found")]
-    public async Task<ActionResult<ApiResponse>> RemoveFeature(Guid id, Guid featureId)
-    {
-        var userFeature = await _db.UserFeatures.FirstOrDefaultAsync(uf => uf.UserId == id && uf.FeatureId == featureId);
-        if (userFeature == null)
-            return NotFound(new ApiResponse(false, "User feature not found")
-            {
-                ErrorCode = "OC-011"  // User feature not found
-            });
-
-        _db.UserFeatures.Remove(userFeature);
-        await _db.SaveChangesAsync();
-
-        return Ok(new ApiResponse(true, "Feature removed successfully")
+        return Ok(new ApiResponse(true, "Password updated successfully")
         {
             ErrorCode = null
         });
     }
 
-    [HttpPost("resellers")]
-    [Authorize(Roles = "super_admin")]
-    [SwaggerOperation(Summary = "Create Reseller", Description = "Creates a new Reseller account. Super admin only.")]
-    [SwaggerResponse(201, "Reseller created")]
-    [SwaggerResponse(400, "Invalid request")]
-    [SwaggerResponse(409, "Email already in use")]
-    public async Task<ActionResult<ApiResponse>> CreateReseller([FromBody] CreateResellerRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest(new ApiResponse(false, "Name and Email are required")
-            {
-                ErrorCode = "OC-001"  // Required fields missing
-            });
+    // ────────────────────────────────────────────────
+    // RESELLER MANAGEMENT
+    // ────────────────────────────────────────────────
 
-        var existing = await _db.Resellers.AnyAsync(r => r.Email == request.Email);
-        if (existing)
-            return Conflict(new ApiResponse(false, "Email already in use")
-            {
-                ErrorCode = "OC-012"  // Email already in use
-            });
-
-        var tempPassword = Guid.NewGuid().ToString("N").Substring(0, 12);
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
-
-        var reseller = new Reseller
-        {
-            ResellerId = Guid.NewGuid(),
-            Name = request.Name,
-            Email = request.Email,
-            ContactName = request.ContactName,
-            PhoneNumber = request.PhoneNumber,
-            CreatedByAdminId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            IsActive = true
-        };
-
-        _db.Resellers.Add(reseller);
-        await _db.SaveChangesAsync();
-
-        // TODO: Send email with tempPassword
-
-        return Created($"/admin/resellers/{reseller.ResellerId}", new ApiResponse(true, "Reseller created")
-        {
-            Data = new
-            {
-                reseller.ResellerId,
-                reseller.Name,
-                reseller.Email,
-                TemporaryPassword = tempPassword // Remove in production
-            },
-            ErrorCode = null
-        });
-    }
-
+    [Authorize]
     [HttpGet("resellers")]
-    [Authorize(Roles = "super_admin")]
-    [SwaggerOperation(Summary = "List Resellers", Description = "Returns all Resellers with basic info and tenant count.")]
-    [SwaggerResponse(200, "Resellers retrieved")]
     public async Task<ActionResult<ApiResponse>> ListResellers()
     {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "resellers", FeatureRight.OnlyView))
+            return BadRequest(new ApiResponse(false, "You do not have permission to view resellers") { ErrorCode = "OC-077" });
+
         var resellers = await _db.Resellers
             .Select(r => new
             {
                 r.ResellerId,
                 r.Name,
                 r.Email,
-                r.ContactName,
-                r.PhoneNumber,
                 r.IsActive,
-                r.CreatedAt,
-                tenantCount = _db.Tenants.Count(t => t.AssignedResellerId == r.ResellerId)
+                TenantCount = _db.Tenants.Count(t => t.AssignedResellerId == r.ResellerId)
             })
             .ToListAsync();
 
@@ -548,36 +316,521 @@ public class AdminController : ControllerBase
         });
     }
 
-    [HttpPatch("tenants/{tenantId:guid}/reseller")]
-    [Authorize(Roles = "super_admin")]
-    [SwaggerOperation(Summary = "Move Tenant to Reseller", Description = "Reassigns a Tenant to a different Reseller.")]
-    [SwaggerResponse(200, "Tenant reassigned")]
-    [SwaggerResponse(404, "Tenant or Reseller not found")]
-    public async Task<ActionResult<ApiResponse>> MoveTenantToReseller(Guid tenantId, [FromBody] MoveTenantRequest request)
+    [Authorize]
+    [HttpPost("resellers")]
+    public async Task<ActionResult<ApiResponse>> CreateReseller([FromBody] CreateResellerDto dto)
     {
-        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId);
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "resellers", FeatureRight.CanCreate))
+            return BadRequest(new ApiResponse(false, "You do not have permission to create resellers") { ErrorCode = "OC-077" });
+
+        if (string.IsNullOrWhiteSpace(dto.Name) || string.IsNullOrWhiteSpace(dto.Email))
+            return BadRequest(new ApiResponse(false, "Name and Email required") { ErrorCode = "OC-059" });
+
+        var existing = await _db.Resellers.AnyAsync(r => r.Email == dto.Email);
+        if (existing)
+            return Conflict(new ApiResponse(false, "Email already in use") { ErrorCode = "OC-060" });
+
+        var tempPassword = Guid.NewGuid().ToString("N").Substring(0, 12);
+        var hash = _hasherReseller.HashPassword(null!, tempPassword);
+
+        var reseller = new Reseller
+        {
+            ResellerId = Guid.NewGuid(),
+            Name = dto.Name,
+            Email = dto.Email,
+            ContactName = dto.ContactName,
+            PhoneNumber = dto.PhoneNumber,
+            PasswordHash = hash,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Resellers.Add(reseller);
+        await _db.SaveChangesAsync();
+
+        return Created($"/admin/resellers/{reseller.ResellerId}", new ApiResponse(true, "Reseller created")
+        {
+            Data = new { reseller.ResellerId, reseller.Name, TemporaryPassword = tempPassword },
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("resellers/{resellerId:guid}/status")]
+    public async Task<ActionResult<ApiResponse>> UpdateResellerStatus(Guid resellerId, [FromBody] AdminUpdateStatusDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "resellers", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update reseller status") { ErrorCode = "OC-077" });
+
+        var reseller = await _db.Resellers.FindAsync(resellerId);
+        if (reseller == null)
+            return NotFound(new ApiResponse(false, "Reseller not found") { ErrorCode = "OC-061" });
+
+        if (reseller.Email.Equals("defaultReseller@ocufii.com", StringComparison.OrdinalIgnoreCase) && !dto.IsActive)
+            return BadRequest(new ApiResponse(false, "Default Ocufii Direct cannot be deactivated") { ErrorCode = "OC-067" });
+
+        reseller.IsActive = dto.IsActive;
+        reseller.UpdatedAt = DateTime.UtcNow;
+        _db.Resellers.Update(reseller);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, $"Reseller {(dto.IsActive ? "activated" : "deactivated")}")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("resellers/{resellerId:guid}")]
+    public async Task<ActionResult<ApiResponse>> UpdateReseller(Guid resellerId, [FromBody] UpdateResellerDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "resellers", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update resellers") { ErrorCode = "OC-077" });
+
+        var reseller = await _db.Resellers.FindAsync(resellerId);
+        if (reseller == null)
+            return NotFound(new ApiResponse(false, "Reseller not found") { ErrorCode = "OC-061" });
+
+        if (dto.Name != null) reseller.Name = dto.Name;
+        if (dto.ContactName != null) reseller.ContactName = dto.ContactName;
+        if (dto.PhoneNumber != null) reseller.PhoneNumber = dto.PhoneNumber;
+
+        reseller.UpdatedAt = DateTime.UtcNow;
+        _db.Resellers.Update(reseller);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Reseller updated")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpDelete("resellers/{resellerId:guid}")]
+    public async Task<ActionResult<ApiResponse>> DeleteReseller(Guid resellerId)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "resellers", FeatureRight.CanDelete))
+            return BadRequest(new ApiResponse(false, "You do not have permission to delete resellers") { ErrorCode = "OC-077" });
+
+        var reseller = await _db.Resellers.FindAsync(resellerId);
+        if (reseller == null)
+            return NotFound(new ApiResponse(false, "Reseller not found") { ErrorCode = "OC-061" });
+
+        if (reseller.Email.Equals("defaultReseller@ocufii.com", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new ApiResponse(false, "Default Ocufii Direct reseller cannot be deleted") { ErrorCode = "OC-067" });
+
+        var hasTenants = await _db.Tenants.AnyAsync(t => t.AssignedResellerId == resellerId);
+        if (hasTenants)
+        {
+            reseller.IsActive = false;
+            reseller.UpdatedAt = DateTime.UtcNow;
+            _db.Resellers.Update(reseller);
+            await _db.SaveChangesAsync();
+
+            return Ok(new ApiResponse(true, "Reseller deactivated (has tenants). Move or delete tenants first to hard delete.")
+            {
+                ErrorCode = "OC-076"
+            });
+        }
+
+        _db.Resellers.Remove(reseller);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Reseller permanently deleted")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("tenants/{tenantId:guid}/reseller")]
+    public async Task<ActionResult<ApiResponse>> MoveTenantToReseller(Guid tenantId, [FromBody] MoveTenantDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to move tenants") { ErrorCode = "OC-077" });
+
+        var tenant = await _db.Tenants.FindAsync(tenantId);
         if (tenant == null)
-            return NotFound(new ApiResponse(false, "Tenant not found")
-            {
-                ErrorCode = "OC-004"  // Tenant not found
-            });
+            return NotFound(new ApiResponse(false, "Tenant not found") { ErrorCode = "OC-062" });
 
-        var newReseller = await _db.Resellers.FirstOrDefaultAsync(r => r.ResellerId == request.NewResellerId);
+        var newReseller = await _db.Resellers.FindAsync(dto.NewResellerId);
         if (newReseller == null)
-            return NotFound(new ApiResponse(false, "New Reseller not found")
-            {
-                ErrorCode = "OC-013"  // New Reseller not found
-            });
+            return NotFound(new ApiResponse(false, "New reseller not found") { ErrorCode = "OC-063" });
 
-        tenant.AssignedResellerId = request.NewResellerId;
+        tenant.AssignedResellerId = dto.NewResellerId;
         tenant.DateUpdated = DateTime.UtcNow;
-
         _db.Tenants.Update(tenant);
         await _db.SaveChangesAsync();
 
-        return Ok(new ApiResponse(true, "Tenant reassigned successfully")
+        return Ok(new ApiResponse(true, "Tenant reassigned")
         {
-            Data = new { tenant.ResellerId, newResellerId = request.NewResellerId },
+            Data = new { tenantId, newResellerId = dto.NewResellerId },
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpGet("features")]
+    public async Task<ActionResult<ApiResponse>> ListPlatformFeatures()
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "reporting", FeatureRight.OnlyView))
+            return BadRequest(new ApiResponse(false, "You do not have permission to view features") { ErrorCode = "OC-077" });
+
+        var features = await _db.Features
+            .Select(f => new
+            {
+                f.Id,
+                f.Key,
+                f.Name,
+                f.Description
+            })
+            .ToListAsync();
+
+        var possibleRights = new[]
+        {
+            new { value = FeatureRight.OnlyView, name = "OnlyView" },
+            new { value = FeatureRight.CanEdit, name = "CanEdit" },
+            new { value = FeatureRight.FullAccess, name = "FullAccess" },
+            new { value = FeatureRight.CanCreate, name = "CanCreate" },
+            new { value = FeatureRight.CanDelete, name = "CanDelete" }
+        };
+
+        if (!features.Any())
+            return Ok(new ApiResponse(true, "No features found in database")
+            {
+                Data = new { features = Array.Empty<object>(), possibleRights },
+                ErrorCode = "OC-073"
+            });
+
+        return Ok(new ApiResponse(true, "Features retrieved")
+        {
+            Data = new { features, possibleRights },
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpGet("me/features-matrix")]
+    public async Task<ActionResult<ApiResponse>> GetMyFeaturesMatrix()
+    {
+        var currentAdminId = GetCurrentAdminId();
+
+        var matrix = await _db.PlatformAdminFeatures
+            .Where(paf => paf.AdminId == currentAdminId)
+            .Join(_db.Features, paf => paf.FeatureId, f => f.Id, (paf, f) => new
+            {
+                f.Key,
+                f.Name,
+                Rights = new
+                {
+                    OnlyView = paf.Right == FeatureRight.OnlyView,
+                    CanEdit = paf.Right == FeatureRight.CanEdit,
+                    FullAccess = paf.Right == FeatureRight.FullAccess,
+                    CanCreate = paf.Right == FeatureRight.CanCreate,
+                    CanDelete = paf.Right == FeatureRight.CanDelete
+                }
+            })
+            .ToListAsync();
+
+        if (!matrix.Any())
+            return Ok(new ApiResponse(true, "No features assigned")
+            {
+                Data = new { matrix = Array.Empty<object>() },
+                ErrorCode = "OC-075"
+            });
+
+        return Ok(new ApiResponse(true, "My features matrix retrieved")
+        {
+            Data = matrix,
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpGet("platform-users/{adminId:guid}/features")]
+    public async Task<ActionResult<ApiResponse>> GetPlatformUserFeatures(Guid adminId)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.OnlyView))
+            return BadRequest(new ApiResponse(false, "You do not have permission to view other users' features") { ErrorCode = "OC-077" });
+
+        var features = await _db.PlatformAdminFeatures
+            .Where(paf => paf.AdminId == adminId)
+            .Join(_db.Features, paf => paf.FeatureId, f => f.Id, (paf, f) => new
+            {
+                f.Key,
+                f.Name,
+                paf.IsEnabled,
+                Right = paf.Right.ToString()
+            })
+            .ToListAsync();
+
+        if (!features.Any())
+            return Ok(new ApiResponse(true, "No features assigned to this platform user")
+            {
+                Data = new { features = Array.Empty<object>() },
+                ErrorCode = "OC-075"
+            });
+
+        return Ok(new ApiResponse(true, "Platform user features retrieved")
+        {
+            Data = features,
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("platform-users/{adminId:guid}/permissions")]
+    public async Task<ActionResult<ApiResponse>> UpdatePlatformUserPermissions(Guid adminId, [FromBody] UpdatePlatformPermissionsDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "platform_users", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update platform user permissions") { ErrorCode = "OC-077" });
+
+        var user = await _db.PlatformAdmins.FindAsync(adminId);
+        if (user == null)
+            return NotFound(new ApiResponse(false, "Platform user not found") { ErrorCode = "OC-058" });
+
+        if (user.Email.Equals("superadmin@ocufii.com", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new ApiResponse(false, "Default super admin permissions cannot be modified") { ErrorCode = "OC-072" });
+
+        if (dto.Role != null)
+        {
+            var validRoles = new[] { "Administrator - Full Access", "CanView", "CanEdit", "CanDelete", "CanCreate" };
+            if (!validRoles.Contains(dto.Role))
+                return BadRequest(new ApiResponse(false, $"Invalid role. Allowed: {string.Join(", ", validRoles)}") { ErrorCode = "OC-065" });
+
+            user.Role = dto.Role;
+        }
+
+        if (dto.Features != null)
+        {
+            foreach (var f in dto.Features)
+            {
+                var uf = await _db.PlatformAdminFeatures.FirstOrDefaultAsync(x => x.AdminId == adminId && x.FeatureId == f.FeatureId);
+                if (uf == null)
+                {
+                    uf = new PlatformAdminFeature
+                    {
+                        AdminId = adminId,
+                        FeatureId = f.FeatureId,
+                        IsEnabled = f.IsEnabled,
+                        Right = (FeatureRight)f.Right,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    _db.PlatformAdminFeatures.Add(uf);
+                }
+                else
+                {
+                    uf.IsEnabled = f.IsEnabled;
+                    uf.Right = (FeatureRight)f.Right;
+                    _db.PlatformAdminFeatures.Update(uf);
+                }
+            }
+        }
+
+        user.UpdatedAt = DateTime.UtcNow;
+        _db.PlatformAdmins.Update(user);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Permissions updated successfully")
+        {
+            ErrorCode = null
+        });
+    }
+
+    // ────────────────────────────────────────────────
+    // RESELLER TENANT MANAGEMENT
+    // ────────────────────────────────────────────────
+
+    [Authorize]
+    [HttpGet("my-tenants")]
+    public async Task<ActionResult<ApiResponse>> ListMyTenants()
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.OnlyView))
+            return BadRequest(new ApiResponse(false, "You do not have permission to view your tenants") { ErrorCode = "OC-077" });
+
+        var resellerId = User.GetResellerId();
+        var tenants = await _db.Tenants
+            .Where(t => t.AssignedResellerId == resellerId)
+            .Select(t => new
+            {
+                t.ResellerId,
+                t.DateCreated,
+                t.DateUpdated,
+                t.IsActive,
+                Status = t.IsActive ? "Active" : "Inactive"
+            })
+            .ToListAsync();
+
+        return Ok(new ApiResponse(true, "My tenants retrieved")
+        {
+            Data = tenants,
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPost("my-tenants")]
+    public async Task<ActionResult<ApiResponse>> CreateTenantAsReseller([FromBody] CreateTenantDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.CanCreate))
+            return BadRequest(new ApiResponse(false, "You do not have permission to create tenants") { ErrorCode = "OC-077" });
+
+        var resellerId = User.GetResellerId();
+
+        var tenant = new Tenant
+        {
+            ResellerId = Guid.NewGuid(),
+            AssignedResellerId = resellerId,
+            DateCreated = DateTime.UtcNow,
+            DateUpdated = DateTime.UtcNow,
+            ThemeConfig = "{}",
+            CustomWorkflows = "[]",
+            IsActive = true
+        };
+
+        _db.Tenants.Add(tenant);
+        await _db.SaveChangesAsync();
+
+        var tempPassword = Guid.NewGuid().ToString("N").Substring(0, 12);
+        var hash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
+
+        var owner = new User
+        {
+            UserId = Guid.NewGuid(),
+            Email = dto.OwnerEmail,
+            FirstName = dto.OwnerFirstName,
+            LastName = dto.OwnerLastName ?? "",
+            Password = hash,
+            RoleId = (await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == "account_owner"))!.RoleId,
+            TenantId = tenant.ResellerId,
+            IsEnabled = true,
+            IsDeleted = false,
+            DateSubmitted = DateTime.UtcNow,
+            DateUpdated = DateTime.UtcNow
+        };
+
+        _db.Users.Add(owner);
+        await _db.SaveChangesAsync();
+
+        // TODO: Send email with temp password
+
+        return Created($"/admin/my-tenants/{tenant.ResellerId}", new ApiResponse(true, "Tenant and account owner created")
+        {
+            Data = new { tenant.ResellerId, owner.UserId, TemporaryPassword = tempPassword },
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("my-tenants/{tenantId:guid}")]
+    public async Task<ActionResult<ApiResponse>> UpdateTenant(Guid tenantId, [FromBody] UpdateTenantDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update tenants") { ErrorCode = "OC-077" });
+
+        var resellerId = User.GetResellerId();
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId && t.AssignedResellerId == resellerId);
+        if (tenant == null)
+            return NotFound(new ApiResponse(false, "Tenant not found") { ErrorCode = "OC-062" });
+
+        var owner = await _db.Users.FirstOrDefaultAsync(u => u.TenantId == tenantId && u.Role.RoleName == "account_owner");
+        if (owner != null && dto.Name != null)
+        {
+            var names = dto.Name.Split(' ');
+            owner.FirstName = names[0];
+            owner.LastName = names.Length > 1 ? names[1] : "";
+            owner.DateUpdated = DateTime.UtcNow;
+            _db.Users.Update(owner);
+        }
+
+        tenant.DateUpdated = DateTime.UtcNow;
+        _db.Tenants.Update(tenant);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Tenant updated")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("my-tenants/{tenantId:guid}/status")]
+    public async Task<ActionResult<ApiResponse>> UpdateTenantStatus(Guid tenantId, [FromBody] AdminUpdateStatusDto dto)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.CanEdit))
+            return BadRequest(new ApiResponse(false, "You do not have permission to update tenant status") { ErrorCode = "OC-077" });
+
+        var resellerId = User.GetResellerId();
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId && t.AssignedResellerId == resellerId);
+        if (tenant == null)
+            return NotFound(new ApiResponse(false, "Tenant not found") { ErrorCode = "OC-062" });
+
+        tenant.IsActive = dto.IsActive;
+        tenant.DateUpdated = DateTime.UtcNow;
+        _db.Tenants.Update(tenant);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, $"Tenant {(dto.IsActive ? "activated" : "deactivated")}")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpDelete("my-tenants/{tenantId:guid}")]
+    public async Task<ActionResult<ApiResponse>> DeleteTenant(Guid tenantId)
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.CanDelete))
+            return BadRequest(new ApiResponse(false, "You do not have permission to delete tenants") { ErrorCode = "OC-077" });
+
+        var resellerId = User.GetResellerId();
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId && t.AssignedResellerId == resellerId);
+        if (tenant == null)
+            return NotFound(new ApiResponse(false, "Tenant not found") { ErrorCode = "OC-062" });
+
+        tenant.IsActive = false;
+        tenant.DateUpdated = DateTime.UtcNow;
+        _db.Tenants.Update(tenant);
+        await _db.SaveChangesAsync();
+
+        return Ok(new ApiResponse(true, "Tenant deactivated")
+        {
+            ErrorCode = null
+        });
+    }
+
+    [Authorize]
+    [HttpGet("my-features")]
+    public async Task<ActionResult<ApiResponse>> GetMyFeatures()
+    {
+        var currentAdminId = GetCurrentAdminId();
+        if (!await _permissionService.CanPerformAsync(currentAdminId, "tenant_management", FeatureRight.OnlyView))
+            return BadRequest(new ApiResponse(false, "You do not have permission to view your features") { ErrorCode = "OC-077" });
+
+        var features = new[]
+        {
+            new { key = "tenant_management", name = "Tenant Management" },
+            new { key = "reporting", name = "Reporting" }
+        };
+
+        return Ok(new ApiResponse(true, "My features retrieved")
+        {
+            Data = features,
             ErrorCode = null
         });
     }

@@ -1,11 +1,13 @@
-﻿namespace OcufiiAPI.Models
+﻿using OcufiiAPI.Enums;
+
+namespace OcufiiAPI.Models
 {
     public class UserFeature
     {
         public Guid UserId { get; set; }
         public Guid FeatureId { get; set; }
         public bool IsEnabled { get; set; } = false;
-        public FeatureRight Right { get; set; } = FeatureRight.OnlyView;
+        public FeatureRight Right { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

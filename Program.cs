@@ -106,6 +106,9 @@ builder.Services.Configure<LegacyConfig>(builder.Configuration.GetSection("Legac
 builder.Services.Configure<SnoozeReasonConfig>(builder.Configuration.GetSection("SnoozeReasons"));
 builder.Services.Configure<MqttConfig>(builder.Configuration.GetSection("Mqtt"));
 
+//Permission Service
+builder.Services.AddScoped<PermissionService>();
+
 // Email Service
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.AddTransient<IEmailService, EmailService>();

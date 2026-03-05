@@ -157,6 +157,21 @@ public class DevicesController : ControllerBase
         var tenantIdClaim = User.FindFirst("tenant_id")?.Value
                             ?? Guid.Parse("00000000-0000-0000-0000-000000000001").ToString();
 
+        string attributesJson = "{}";
+
+        if (!string.IsNullOrWhiteSpace(request.Attributes))
+        {
+            try
+            {
+                JsonDocument.Parse(request.Attributes);
+                attributesJson = request.Attributes.Trim();
+            }
+            catch (JsonException)
+            {
+                attributesJson = "{}";
+            }
+        }
+
         Device device;
         var softDeletedDevice = await _db.Devices.FirstOrDefaultAsync(d =>
             d.MacAddress.ToUpper() == normalizedMac && d.IsDeleted);
@@ -172,7 +187,7 @@ public class DevicesController : ControllerBase
             device.Name = request.Name?.Trim();
             device.Location = request.Location?.Trim();
             device.Information = request.Information?.Trim();
-            device.Attributes = request.Attributes ?? "{}";
+            device.Attributes = attributesJson;
         }
         else
         {
@@ -184,7 +199,7 @@ public class DevicesController : ControllerBase
                 Name = request.Name?.Trim(),
                 Location = request.Location?.Trim(),
                 Information = request.Information?.Trim(),
-                Attributes = request.Attributes ?? "{}",
+                Attributes = attributesJson,
                 UserId = currentUserId,
                 TenantId = Guid.Parse(tenantIdClaim),
                 IsEnabled = true,

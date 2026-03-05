@@ -1,4 +1,5 @@
-﻿using OcufiiAPI.Models;
+﻿using OcufiiAPI.Enums;
+using OcufiiAPI.Models;
 
 namespace OcufiiAPI.DTO
 {
@@ -56,5 +57,69 @@ namespace OcufiiAPI.DTO
         public string Email { get; set; } = string.Empty;
         public string? ContactName { get; set; }
         public string? PhoneNumber { get; set; }
+    }
+
+    public class CreatePlatformUserDto
+    {
+        public string Email { get; set; } = string.Empty;
+        public string FirstName { get; set; } = string.Empty;
+        public string? LastName { get; set; }
+        public string? Role { get; set; }
+        public List<FeatureAssignmentDto>? Features { get; set; }
+    }
+
+    public class CreateResellerDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? ContactName { get; set; }
+        public string? PhoneNumber { get; set; }
+    }
+
+    public class AdminUpdateStatusDto
+    {
+        public bool IsActive { get; set; }
+    }
+
+    public class UpdateRoleDto
+    {
+        public string Role { get; set; } = string.Empty;
+    }
+
+    public class UpdateResellerDto
+    {
+        public string? Name { get; set; }
+        public string? ContactName { get; set; }
+        public string? PhoneNumber { get; set; }
+    }
+
+    public class UpdateTenantDto
+    {
+        public string? Name { get; set; }
+    }
+
+    public class MoveTenantDto
+    {
+        public Guid NewResellerId { get; set; }
+    }
+
+    public class CreateTenantDto
+    {
+        public string OwnerEmail { get; set; } = string.Empty;
+        public string OwnerFirstName { get; set; } = string.Empty;
+        public string? OwnerLastName { get; set; }
+    }
+
+    public class UpdatePlatformPermissionsDto
+    {
+        public string? Role { get; set; }
+        public List<FeatureAssignmentDto>? Features { get; set; }
+    }
+
+    public class FeatureAssignmentDto
+    {
+        public Guid FeatureId { get; set; }
+        public bool IsEnabled { get; set; }
+        public int Right { get; set; } // 0-4
     }
 }

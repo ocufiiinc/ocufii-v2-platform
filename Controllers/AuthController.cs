@@ -39,6 +39,7 @@ public class AuthController : ControllerBase
     private readonly LegacyConfig _legacy;
     private readonly PasswordHasher<User> _hasher = new();
     private readonly PasswordHasher<PlatformAdmin> _platformHasher = new();
+    private readonly PasswordHasher<Reseller> _resellerHasher = new();
 
     public AuthController(
         IRepository<User> userRepo,
@@ -443,60 +444,81 @@ public class AuthController : ControllerBase
 
     [HttpPost("platform-login")]
     [AllowAnonymous]
-    [SwaggerOperation(Summary = "Platform Admin Login", Description = "Authenticates Ocufii Super Admin. Separate from regular user login.")]
-    [SwaggerResponse(200, "Login successful", typeof(ApiResponse))]
-    [SwaggerResponse(401, "Invalid email or password")]
+    [SwaggerOperation(Summary = "Platform & Reseller Login")]
     public async Task<IActionResult> PlatformLogin([FromBody] PlatformLoginDto dto)
     {
-        var admin = await _db.PlatformAdmins
-            .FirstOrDefaultAsync(a => a.Email == dto.Email);
-
-        if (admin == null || _platformHasher.VerifyHashedPassword(admin, admin.PasswordHash, dto.Password) == PasswordVerificationResult.Failed)
-            return Unauthorized(new ApiResponse(false, "Invalid email or password")
-            {
-                ErrorCode = "OC-011"
-            });
-
-        var claims = new[]
+        // 1. Platform Admin (PlatformAdmin table)
+        var platformAdmin = await _db.PlatformAdmins.FirstOrDefaultAsync(a => a.Email == dto.Email);
+        if (platformAdmin != null)
         {
-            new Claim(ClaimTypes.Email, admin.Email),
-            new Claim(ClaimTypes.NameIdentifier, admin.AdminId.ToString()),
-            new Claim(ClaimTypes.Name, $"{admin.FirstName} {admin.LastName}".Trim()),
-            new Claim(ClaimTypes.Role, "super_admin")
+            if (!platformAdmin.IsActive)
+                return Unauthorized(new ApiResponse(false, "Account deactivated. Contact Ocufii support.") { ErrorCode = "OC-064" });
+
+            var verificationResult = _platformHasher.VerifyHashedPassword(
+            platformAdmin,
+            platformAdmin.PasswordHash,
+            dto.Password
+        );
+
+            if (verificationResult == PasswordVerificationResult.Failed)
+                return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-011" });
+
+            var claims = new[]
+            {
+            new Claim(ClaimTypes.Email, platformAdmin.Email),
+            new Claim(ClaimTypes.NameIdentifier, platformAdmin.AdminId.ToString()),
+            new Claim(ClaimTypes.Role, platformAdmin.Role ?? "super_admin"),
+            new Claim("user_type", "platform")
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var token = new JwtSecurityToken(
-            issuer: _jwt.Issuer,
-            audience: _jwt.Audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(_jwt.AccessTokenMinutes),
-            signingCredentials: creds);
+            var accessToken = GenerateAccessToken(claims);
 
-        var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+            platformAdmin.LastLogin = DateTime.UtcNow;
+            _db.PlatformAdmins.Update(platformAdmin);
+            await _db.SaveChangesAsync();
 
-        admin.LastLogin = DateTime.UtcNow;
-        _db.PlatformAdmins.Update(admin);
-        await _db.SaveChangesAsync();
-
-        Log.Information("Platform admin logged in: {Email}", admin.Email);
-
-        return Ok(new ApiResponse(true, "Platform login successful")
-        {
-            Data = new
+            return Ok(new ApiResponse(true, "Platform login successful")
             {
-                access_token = accessToken,
-                admin = new
-                {
-                    admin.AdminId,
-                    admin.Email,
-                    admin.FirstName,
-                    admin.LastName
-                }
-            },
-            ErrorCode = null
-        });
+                Data = new { access_token = accessToken, role = platformAdmin.Role ?? "super_admin", user_type = "platform" },
+                ErrorCode = null
+            });
+        }
+
+        // 2. Reseller Admin (Resellers table)
+        var reseller = await _db.Resellers.FirstOrDefaultAsync(r => r.Email == dto.Email);
+        if (reseller != null)
+        {
+            if (!reseller.IsActive)
+                return Unauthorized(new ApiResponse(false, "Reseller account is deactivated. Contact Ocufii support.") { ErrorCode = "OC-064" });
+
+            var verificationResult = _resellerHasher.VerifyHashedPassword(
+            reseller,
+            reseller.PasswordHash,
+            dto.Password
+        );
+
+            if (verificationResult == PasswordVerificationResult.Failed)
+                return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-011" });
+
+            var claims = new[]
+            {
+            new Claim(ClaimTypes.Email, reseller.Email),
+            new Claim(ClaimTypes.NameIdentifier, reseller.ResellerId.ToString()),
+            new Claim(ClaimTypes.Role, "reseller_admin"),
+            new Claim("user_type", "reseller"),
+            new Claim("reseller_id", reseller.ResellerId.ToString())
+        };
+
+            var accessToken = GenerateAccessToken(claims);
+
+            return Ok(new ApiResponse(true, "Reseller login successful")
+            {
+                Data = new { access_token = accessToken, role = "reseller_admin", user_type = "reseller" },
+                ErrorCode = null
+            });
+        }
+
+        return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-011" });
     }
 
     private (string accessToken, string refreshToken) GenerateTokens(User user)
@@ -521,6 +543,21 @@ public class AuthController : ControllerBase
 
         var refreshToken = Guid.NewGuid().ToString("N");
         return (new JwtSecurityTokenHandler().WriteToken(accessToken), refreshToken);
+    }
+
+    private string GenerateAccessToken(IEnumerable<Claim> claims)
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _jwt.Issuer,
+            audience: _jwt.Audience,
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(_jwt.AccessTokenMinutes),
+            signingCredentials: creds);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
     private async Task SaveRefreshToken(Guid userId, string token)

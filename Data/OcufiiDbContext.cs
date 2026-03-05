@@ -31,6 +31,7 @@ namespace OcufiiAPI.Data
         public DbSet<Reseller> Resellers { get; set; } = null!;
         public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; } = null!;
         public DbSet<SafetyLink> SafetyLinks { get; set; } = null!;
+        public DbSet<PlatformAdminFeature> PlatformAdminFeatures { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
