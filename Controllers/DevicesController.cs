@@ -299,10 +299,7 @@ public class DevicesController : ControllerBase
             var mqttSuccess = await SendDeviceDeletionMqttMessage(device);
             if (!mqttSuccess)
             {
-                return StatusCode(500, new ApiResponse(false, "Failed to communicate with device via MQTT after multiple retries")
-                {
-                    ErrorCode = "OC-021"
-                });
+                _logger.LogWarning($"MQTT communication failed for device {deviceId}, but proceeding with database deletion");
             }
         }
 
@@ -320,10 +317,9 @@ public class DevicesController : ControllerBase
 
     private async Task<bool> SendDeviceDeletionMqttMessage(Device device)
     {
-        var cleanMac = device.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
         if (device.DeviceType.Key.ToLowerInvariant() == "gateway")
         {
-            return await SendGatewayResetMessage(cleanMac);
+            return await SendGatewayResetMessage(device);
         }
         else if (device.DeviceType.Key.ToLowerInvariant() == "beacon")
         {
@@ -332,8 +328,12 @@ public class DevicesController : ControllerBase
         return true;
     }
 
-    private async Task<bool> SendGatewayResetMessage(string gatewayMac)
+    private async Task<bool> SendGatewayResetMessage(Device gatewayDevice)
     {
+        var gatewayMac = gatewayDevice.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
+        var userId = gatewayDevice.UserId!.ToString();
+        var deviceId = gatewayDevice.Id.ToString();
+
         const int maxRetries = 2;
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
@@ -343,9 +343,8 @@ public class DevicesController : ControllerBase
                 var factory = new MqttFactory();
                 mqttClient?.Dispose();
                 mqttClient = factory.CreateMqttClient();
-                var deviceId = $"test{gatewayMac}";
-                var publishTopic = $"MINI-02-58B6/{deviceId}/app_to_device";
-                var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
+                var publishTopic = $"iot/stg/{userId}/gw/{deviceId}/down";
+                var subscribeTopic = $"iot/stg/{userId}/gw/{deviceId}/up";
                 var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
                 mqttClient.ApplicationMessageReceivedAsync += e =>
                 {
@@ -381,12 +380,12 @@ public class DevicesController : ControllerBase
                 var payload = new
                 {
                     msg_id = 1001,
-                    device_info = new { device_id = deviceId, mac = gatewayMac },
+                    device_info = new { device_id = gatewayMac, mac = gatewayMac },
                     data = new { reset_state = 1 }
                 };
                 var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
                 {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
                 });
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(publishTopic)
@@ -452,8 +451,7 @@ public class DevicesController : ControllerBase
 
         foreach (var gateway in gateways)
         {
-            var gatewayMac = gateway.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
-            bool gatewaySuccess = await SendBeaconListToGateway(gatewayMac, beaconMacs);
+            bool gatewaySuccess = await SendBeaconListToGateway(gateway, beaconMacs);
             if (gatewaySuccess) successCount++;
             else failureCount++;
         }
@@ -464,8 +462,12 @@ public class DevicesController : ControllerBase
         return false;
     }
 
-    private async Task<bool> SendBeaconListToGateway(string gatewayMac, string[] beaconMacs)
+    private async Task<bool> SendBeaconListToGateway(Device gateway, string[] beaconMacs)
     {
+        var gatewayMac = gateway.MacAddress.Replace(":", "").Replace("-", "").ToUpperInvariant();
+        var userId = gateway.UserId!.ToString();
+        var deviceId = gateway.Id.ToString();
+
         const int maxRetries = 2;
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
@@ -475,9 +477,8 @@ public class DevicesController : ControllerBase
                 var factory = new MqttFactory();
                 mqttClient?.Dispose();
                 mqttClient = factory.CreateMqttClient();
-                var deviceId = $"test{gatewayMac}";
-                var publishTopic = $"MINI-02-58B6/{deviceId}/app_to_device";
-                var subscribeTopic = $"MINI-02-58B6/test567/device_to_app";
+                var publishTopic = $"iot/stg/{userId}/gw/{deviceId}/down";
+                var subscribeTopic = $"iot/stg/{userId}/gw/{deviceId}/up";
                 var receivedMessages = new ConcurrentBag<(int? msgId, string payload, DateTime timestamp)>();
                 mqttClient.ApplicationMessageReceivedAsync += e =>
                 {
@@ -534,12 +535,12 @@ public class DevicesController : ControllerBase
                 var payload = new
                 {
                     msg_id = 1028,
-                    device_info = new { device_id = deviceId, mac = gatewayMac },
+                    device_info = new { device_id = gatewayMac, mac = gatewayMac },
                     data = step3Data
                 };
                 var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
                 {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
                 });
                 var message = new MqttApplicationMessageBuilder()
                     .WithTopic(publishTopic)
