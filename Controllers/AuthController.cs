@@ -68,14 +68,21 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
         var user = await _userRepo.Query()
-            .Where(u => u.Email == dto.Email && !u.IsDeleted)
-            .Include(u => u.Role)
-            .FirstOrDefaultAsync();
+        .Where(u => u.Email == dto.Email && !u.IsDeleted)
+        .Include(u => u.Role)
+        .Include(u => u.Tenant) 
+        .FirstOrDefaultAsync();
 
         if (user == null || _hasher.VerifyHashedPassword(user, user.Password, dto.Password) == PasswordVerificationResult.Failed)
             return Unauthorized(new ApiResponse(false, "Invalid email or password")
             {
                 ErrorCode = "OC-014"
+            });
+
+        if (user.Tenant != null && !user.Tenant.IsActive)
+            return Unauthorized(new ApiResponse(false, "Your tenant account has been deactivated. Contact your reseller.")
+            {
+                ErrorCode = "OC-091" 
             });
 
         var (accessToken, refreshToken) = GenerateTokens(user);
@@ -113,33 +120,44 @@ public class AuthController : ControllerBase
             ErrorCode = null
         });
     }
-
+    
     [HttpPost("device-token")]
     [SwaggerOperation(
         Summary = "Register/Update Firebase Device Token",
-        Description = "Registers or updates the Firebase token for the authenticated user")]
+        Description = "Registers or updates the Firebase token for the authenticated user. " +
+                      "Ensures only one active device token per user. " +
+                      "If the token is already used by another user, it will be rejected."
+    )]
     [SwaggerResponse(200, "Token registered/updated")]
-    [SwaggerResponse(400, "Invalid request - DeviceTokenValue required")]
+    [SwaggerResponse(400, "Invalid request")]
+    [SwaggerResponse(409, "Token already in use by another user")]
     public async Task<ActionResult<ApiResponse>> RegisterDeviceToken([FromBody] DeviceTokenRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.DeviceTokenValue))
-            return BadRequest(new ApiResponse(false, "DeviceTokenValue is required")
-            {
-                ErrorCode = "OC-015"
-            });
+            return BadRequest(new ApiResponse(false, "DeviceTokenValue is required") { ErrorCode = "OC-015" });
 
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
-        var existing = await _db.DeviceToken
-            .FirstOrDefaultAsync(t => t.DeviceTokenValue == request.DeviceTokenValue);
+        var tokenUsedByOther = await _db.DeviceToken
+            .AnyAsync(t => t.DeviceTokenValue == request.DeviceTokenValue && t.UserId != userId);
 
-        if (existing != null)
+        if (tokenUsedByOther)
+            return Conflict(new ApiResponse(false, "This device token is already registered to another user")
+            {
+                ErrorCode = "OC-082" 
+            });
+
+        var existingForUser = await _db.DeviceToken
+            .FirstOrDefaultAsync(t => t.UserId == userId);
+
+        if (existingForUser != null)
         {
-            existing.UserId = userId;
-            existing.MobileDevice = request.MobileDevice;
-            existing.MobileOsVersion = request.MobileOsVersion;
-            existing.Version = request.Version;
-            _db.DeviceToken.Update(existing);
+            existingForUser.DeviceTokenValue = request.DeviceTokenValue;
+            existingForUser.MobileDevice = request.MobileDevice;
+            existingForUser.MobileOsVersion = request.MobileOsVersion;
+            existingForUser.Version = request.Version;
+
+            _db.DeviceToken.Update(existingForUser);
         }
         else
         {
@@ -151,6 +169,7 @@ public class AuthController : ControllerBase
                 MobileOsVersion = request.MobileOsVersion,
                 Version = request.Version
             };
+
             _db.DeviceToken.Add(newToken);
         }
 
@@ -445,35 +464,46 @@ public class AuthController : ControllerBase
     [HttpGet("email/{email}/validate")]
     [AllowAnonymous]
     [SwaggerOperation(
-    Summary = "Check if email is available",
-    Description = "Validates whether an email address is already registered in the system"
-)]
-    [SwaggerResponse(200, "Email availability check result", typeof(object))]
+     Summary = "Check if email is available",
+     Description = "Checks if the email can be used for new user registration"
+ )]
+    [SwaggerResponse(200, "Email availability result")]
     public async Task<IActionResult> ValidateEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email))
-            return BadRequest(new ApiResponse(false, "Email is required") { ErrorCode = "OC-080" });
+            return BadRequest(new ApiResponse(false, "Email is required")
+            {
+                ErrorCode = "OC-080"
+            });
 
         email = email.Trim().ToLowerInvariant();
 
         var userExists = await _db.Users
             .AnyAsync(u => u.Email == email && !u.IsDeleted);
 
-        var platformAdminExists = await _db.PlatformAdmins
-            .AnyAsync(p => p.Email == email);
+        var isTaken = userExists;
 
-        var resellerExists = await _db.Resellers
-            .AnyAsync(r => r.Email == email);
+        if (isTaken)
+        {
+            return Ok(new ApiResponse(true, "Email is already in use")
+            {
+                Data = new
+                {
+                    email = email,
+                    isAvailable = false,
+                    message = "Email is already in use."
+                },
+                ErrorCode = "OC-081" 
+            });
+        }
 
-        var exists = userExists || platformAdminExists || resellerExists;
-
-        return Ok(new ApiResponse(true, "Email checker")
+        return Ok(new ApiResponse(true, "Email is available")
         {
             Data = new
             {
                 email = email,
-                isAvailable = !exists,
-                message = exists ? "Email already exists." : "Email is available."
+                isAvailable = true,
+                message = "Email is available for registration."
             },
             ErrorCode = null
         });

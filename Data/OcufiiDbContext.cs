@@ -32,6 +32,7 @@ namespace OcufiiAPI.Data
         public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; } = null!;
         public DbSet<SafetyLink> SafetyLinks { get; set; } = null!;
         public DbSet<PlatformAdminFeature> PlatformAdminFeatures { get; set; }
+        public DbSet<ResellerFeature> ResellerFeatures { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -431,6 +432,41 @@ namespace OcufiiAPI.Data
                       .OnDelete(DeleteBehavior.Cascade);
                 entity.HasIndex(e => new { e.SenderId, e.RecipientId }).IsUnique();  // No duplicate links
                 entity.HasIndex(e => e.Status);  // Performance for queries
+            });
+
+            modelBuilder.Entity<ResellerFeature>(entity =>
+            {
+                entity.ToTable("ResellerFeatures");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasDefaultValueSql("gen_random_uuid()");
+
+                entity.Property(e => e.IsEnabled)
+                    .HasDefaultValue(true);
+
+                entity.Property(e => e.Right)
+                    .HasDefaultValue(FeatureRight.FullAccess);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasDefaultValueSql("NOW()");
+
+                entity.Property(e => e.UpdatedAt)
+                    .HasDefaultValueSql("NOW()");
+
+                entity.HasOne(e => e.Reseller)
+                    .WithMany()
+                    .HasForeignKey(e => e.ResellerId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(e => e.Feature)
+                    .WithMany()
+                    .HasForeignKey(e => e.FeatureId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasIndex(e => new { e.ResellerId, e.FeatureId })
+                    .IsUnique();
             });
 
             var dateTimeProperties = modelBuilder.Model.GetEntityTypes()
