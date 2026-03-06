@@ -442,12 +442,48 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpGet("email/{email}/validate")]
+    [AllowAnonymous]
+    [SwaggerOperation(
+    Summary = "Check if email is available",
+    Description = "Validates whether an email address is already registered in the system"
+)]
+    [SwaggerResponse(200, "Email availability check result", typeof(object))]
+    public async Task<IActionResult> ValidateEmail(string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return BadRequest(new ApiResponse(false, "Email is required") { ErrorCode = "OC-080" });
+
+        email = email.Trim().ToLowerInvariant();
+
+        var userExists = await _db.Users
+            .AnyAsync(u => u.Email == email && !u.IsDeleted);
+
+        var platformAdminExists = await _db.PlatformAdmins
+            .AnyAsync(p => p.Email == email);
+
+        var resellerExists = await _db.Resellers
+            .AnyAsync(r => r.Email == email);
+
+        var exists = userExists || platformAdminExists || resellerExists;
+
+        return Ok(new ApiResponse(true, "Email checker")
+        {
+            Data = new
+            {
+                email = email,
+                isAvailable = !exists,
+                message = exists ? "Email already exists." : "Email is available."
+            },
+            ErrorCode = null
+        });
+    }
+
     [HttpPost("platform-login")]
     [AllowAnonymous]
     [SwaggerOperation(Summary = "Platform & Reseller Login")]
     public async Task<IActionResult> PlatformLogin([FromBody] PlatformLoginDto dto)
     {
-        // 1. Platform Admin (PlatformAdmin table)
         var platformAdmin = await _db.PlatformAdmins.FirstOrDefaultAsync(a => a.Email == dto.Email);
         if (platformAdmin != null)
         {
@@ -484,7 +520,6 @@ public class AuthController : ControllerBase
             });
         }
 
-        // 2. Reseller Admin (Resellers table)
         var reseller = await _db.Resellers.FirstOrDefaultAsync(r => r.Email == dto.Email);
         if (reseller != null)
         {
