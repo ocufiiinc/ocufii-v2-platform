@@ -16,12 +16,12 @@ namespace OcufiiAPI.Controllers
 {
     [ApiController]
     [Route("mqtt-filter")]
-    [Authorize]
     public class MqttFilterController : ControllerBase
     {
         private readonly OcufiiDbContext _db;
         private readonly MqttConfig _mqttConfig;
         private readonly ILogger<MqttFilterController> _logger;
+        private readonly string _logFilePath;
 
         public MqttFilterController(
             OcufiiDbContext db,
@@ -31,8 +31,9 @@ namespace OcufiiAPI.Controllers
             _db = db;
             _mqttConfig = mqttConfig.Value;
             _logger = logger;
+            _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "webhook_logs.txt");
         }
-
+        [Authorize]
         [HttpPost("apply-gateway-filter")]
         public async Task<IActionResult> ApplyGatewayFilterWithAcknowledgement([FromBody] ApplyGatewayFilterRequest request)
         {
@@ -788,11 +789,45 @@ namespace OcufiiAPI.Controllers
                 }
             }
         }
-    }
+
+        [HttpPost("log")]
+        public async Task<IActionResult> LogRequest([FromBody] JsonElement request)
+        {
+            try
+            {
+                var requestBody = JsonSerializer.Serialize(request, new JsonSerializerOptions { WriteIndented = true });
+
+                var logEntry = new StringBuilder();
+                logEntry.AppendLine("========================================");
+                logEntry.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                logEntry.AppendLine($"JsonType: {request.ValueKind}");
+                logEntry.AppendLine("Full Body:");
+                logEntry.AppendLine(requestBody);
+                logEntry.AppendLine("========================================");
+                logEntry.AppendLine();
+
+                await System.IO.File.AppendAllTextAsync(_logFilePath, logEntry.ToString());
+
+                _logger.LogInformation("Request logged successfully to {FilePath}", _logFilePath);
+
+                return Ok(new
+                {
+                    message = "Request logged successfully",
+                    logFile = _logFilePath
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error logging request");
+                return StatusCode(500, new { error = "Failed to log request", details = ex.Message });
+            }
+        }
+}
 
     public class ApplyGatewayFilterRequest
     {
         /// <summary>The database ID of the device (gateway or beacon).</summary>
         public Guid DeviceId { get; set; }
     }
+
 }
