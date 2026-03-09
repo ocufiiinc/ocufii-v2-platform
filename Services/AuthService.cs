@@ -29,7 +29,7 @@ namespace OcufiiAPI.Services
             return GenerateJwtToken(user);
         }
 
-        public async Task<bool> RegisterAsync(string email, string password, string firstName, string role = "viewer")
+        public async Task<bool> RegisterAsync(string email, string password, string firstName, string role = "account_owner")
         {
             var roleEntity = (await _roleRepo.FindAsync(r => r.RoleName == role)).FirstOrDefault();
             if (roleEntity == null)
@@ -58,7 +58,7 @@ namespace OcufiiAPI.Services
             {
                 new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
                 new Claim(ClaimTypes.Email, user.Email),
-                new Claim(ClaimTypes.Role, user.Role?.RoleName ?? "viewer")
+                new Claim(ClaimTypes.Role, user.Role?.RoleName ?? "account_owner")
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtConfig.Secret));

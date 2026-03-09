@@ -13,5 +13,6 @@
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
         public bool IsActive { get; set; } = true;
         public string PasswordHash { get; set; } = string.Empty;
+        public string Role { get; set; } = "reseller_admin";
     }
 }

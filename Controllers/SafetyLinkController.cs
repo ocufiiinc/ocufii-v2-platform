@@ -426,17 +426,20 @@ public class SafetyLinkController : ControllerBase
     }
 
     [HttpGet("linked-members")]
-    [SwaggerOperation(Summary = "Get Linked Members", Description = "Returns inbound and outbound linked members with details.")]
-    [SwaggerResponse(200, "Linked members retrieved")]
+    [SwaggerOperation(Summary = "Get Linked Members", Description = "Returns bidirectional linked members. After acceptance, the same link appears in both Outbound and Inbound for symmetry.")]
     public async Task<ActionResult<ApiResponse>> GetLinkedMembers()
     {
         var userId = User.GetUserId();
 
-        var outbound = await _safetyLinkRepo.Query().Where(l => l.SenderId == userId)
-            .Select(l => new LinkedMemberDto
+        var allLinks = await _safetyLinkRepo.Query()
+            .Where(l => (l.SenderId == userId || l.RecipientId == userId)
+                     && l.Status == SafetyLinkStatus.Accepted)
+            .Select(l => new
             {
                 LinkId = l.Id,
-                Email = _db.Users.Where(u => u.UserId == l.RecipientId).Select(u => u.Email).FirstOrDefault(),
+                Email = l.SenderId == userId
+                    ? _db.Users.Where(u => u.UserId == l.RecipientId).Select(u => u.Email).FirstOrDefault()
+                    : _db.Users.Where(u => u.UserId == l.SenderId).Select(u => u.Email).FirstOrDefault(),
                 AliasName = l.AliasName,
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
@@ -445,24 +448,40 @@ public class SafetyLinkController : ControllerBase
                 Snooze = l.Snooze,
                 SnoozeStartTime = l.SnoozeStartTime,
                 SnoozeEndTime = l.SnoozeEndTime,
-                IsOtpExpired = l.Status == SafetyLinkStatus.Pending && l.OTPExpiry < DateTime.UtcNow
-            }).ToListAsync();
+                IsOtpExpired = false,
+                IsOutbound = l.SenderId == userId 
+            })
+            .ToListAsync();
 
-        var inbound = await _safetyLinkRepo.Query().Where(l => l.RecipientId == userId)
-            .Select(l => new LinkedMemberDto
-            {
-                LinkId = l.Id,
-                Email = _db.Users.Where(u => u.UserId == l.SenderId).Select(u => u.Email).FirstOrDefault(),
-                AliasName = l.AliasName,
-                Status = l.Status,
-                EnableLocation = l.EnableLocation,
-                EnableSafety = l.EnableSafety,
-                EnableSecurity = l.EnableSecurity,
-                Snooze = l.Snooze,
-                SnoozeStartTime = l.SnoozeStartTime,
-                SnoozeEndTime = l.SnoozeEndTime,
-                IsOtpExpired = l.Status == SafetyLinkStatus.Pending && l.OTPExpiry < DateTime.UtcNow
-            }).ToListAsync();
+        var outbound = allLinks.Where(l => l.IsOutbound).Select(l => new LinkedMemberDto
+        {
+            LinkId = l.LinkId,
+            Email = l.Email,
+            AliasName = l.AliasName,
+            Status = l.Status,
+            EnableLocation = l.EnableLocation,
+            EnableSafety = l.EnableSafety,
+            EnableSecurity = l.EnableSecurity,
+            Snooze = l.Snooze,
+            SnoozeStartTime = l.SnoozeStartTime,
+            SnoozeEndTime = l.SnoozeEndTime,
+            IsOtpExpired = l.IsOtpExpired
+        }).ToList();
+
+        var inbound = allLinks.Where(l => !l.IsOutbound).Select(l => new LinkedMemberDto
+        {
+            LinkId = l.LinkId,
+            Email = l.Email,
+            AliasName = l.AliasName,
+            Status = l.Status,
+            EnableLocation = l.EnableLocation,
+            EnableSafety = l.EnableSafety,
+            EnableSecurity = l.EnableSecurity,
+            Snooze = l.Snooze,
+            SnoozeStartTime = l.SnoozeStartTime,
+            SnoozeEndTime = l.SnoozeEndTime,
+            IsOtpExpired = l.IsOtpExpired
+        }).ToList();
 
         return Ok(new ApiResponse(true, "Linked members retrieved")
         {

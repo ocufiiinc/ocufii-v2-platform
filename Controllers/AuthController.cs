@@ -594,7 +594,7 @@ public class AuthController : ControllerBase
             new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
             new Claim(ClaimTypes.Name, $"{user.FirstName} {user.LastName}".Trim()),
             new Claim("tenant_id", _legacy.FixedTenantId),
-            new Claim(ClaimTypes.Role, user.Role?.RoleName ?? "viewer")
+            new Claim(ClaimTypes.Role, user.Role?.RoleName ?? "account_owner")
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
