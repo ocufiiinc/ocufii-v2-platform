@@ -577,6 +577,7 @@ public class AdminController : ControllerBase
                 .Where(paf => paf.AdminId == adminId)
                 .Join(_db.Features, paf => paf.FeatureId, f => f.Id, (paf, f) => new
                 {
+                    f.Id,
                     f.Key,
                     f.Name,
                     Rights = new

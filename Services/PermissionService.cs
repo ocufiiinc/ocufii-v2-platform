@@ -32,7 +32,7 @@ public class PermissionService
             var admin = await _db.PlatformAdmins.FindAsync(userId);
             if (admin == null) return false;
 
-            if (admin.Role == "super_admin" || admin.Role == "Administrator - Full Access")
+            if (admin.Role == "super_admin")
                 return true;
 
             return await _db.PlatformAdminFeatures
