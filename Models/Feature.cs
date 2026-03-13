@@ -1,4 +1,6 @@
-﻿namespace OcufiiAPI.Models
+﻿using OcufiiAPI.Enums;
+
+namespace OcufiiAPI.Models
 {
     public class Feature
     {
@@ -9,7 +11,7 @@
         public Guid? DeviceTypeId { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-
+        public FeatureType FeatureType { get; set; } = FeatureType.Platform;
         public DeviceType? DeviceType { get; set; }
     }
 }

@@ -33,6 +33,7 @@ namespace OcufiiAPI.Data
         public DbSet<SafetyLink> SafetyLinks { get; set; } = null!;
         public DbSet<PlatformAdminFeature> PlatformAdminFeatures { get; set; }
         public DbSet<ResellerFeature> ResellerFeatures { get; set; }
+        public DbSet<ResellerAllowedTenantFeature> ResellerAllowedTenantFeatures { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -320,6 +321,7 @@ namespace OcufiiAPI.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
                 entity.HasIndex(e => e.Key).IsUnique();
+                entity.Property(e => e.FeatureType).HasDefaultValue(FeatureType.Platform);
             });
 
             modelBuilder.Entity<UserFeature>(entity =>
@@ -327,7 +329,7 @@ namespace OcufiiAPI.Data
                 entity.ToTable("UserFeatures");
                 entity.HasKey(e => new { e.UserId, e.FeatureId });
                 entity.Property(e => e.IsEnabled).HasDefaultValue(false);
-                entity.Property(e => e.Right).HasConversion<string>();
+                //entity.Property(e => e.Right).HasConversion<string>();
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
                 entity.HasOne(uf => uf.User)
@@ -434,6 +436,21 @@ namespace OcufiiAPI.Data
                 entity.HasIndex(e => e.Status);  // Performance for queries
             });
 
+            modelBuilder.Entity<ResellerAllowedTenantFeature>(entity =>
+            {
+                entity.ToTable("ResellerAllowedTenantFeatures");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Reseller)
+                      .WithMany()
+                      .HasForeignKey(e => e.ResellerId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Feature)
+                      .WithMany()
+                      .HasForeignKey(e => e.FeatureId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(e => new { e.ResellerId, e.FeatureId }).IsUnique();
+            });
+
             modelBuilder.Entity<ResellerFeature>(entity =>
             {
                 entity.ToTable("ResellerFeatures");
@@ -445,9 +462,6 @@ namespace OcufiiAPI.Data
 
                 entity.Property(e => e.IsEnabled)
                     .HasDefaultValue(true);
-
-                entity.Property(e => e.Right)
-                    .HasDefaultValue(FeatureRight.FullAccess);
 
                 entity.Property(e => e.CreatedAt)
                     .HasDefaultValueSql("NOW()");

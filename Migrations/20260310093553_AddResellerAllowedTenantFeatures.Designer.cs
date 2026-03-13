@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OcufiiAPI.Data;
@@ -11,9 +12,11 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    partial class OcufiiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260310093553_AddResellerAllowedTenantFeatures")]
+    partial class AddResellerAllowedTenantFeatures
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -295,11 +298,6 @@ namespace OcufiiAPI.Migrations
 
                     b.Property<Guid?>("DeviceTypeId")
                         .HasColumnType("uuid");
-
-                    b.Property<int>("FeatureType")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
 
                     b.Property<string>("Key")
                         .IsRequired()
@@ -658,29 +656,17 @@ namespace OcufiiAPI.Migrations
                     b.Property<Guid>("AdminId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("CanCreate")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("CanDelete")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("CanEdit")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("FeatureId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("FullAccess")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<bool>("OnlyView")
-                        .HasColumnType("boolean");
+                    b.Property<int>("Right")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -791,52 +777,12 @@ namespace OcufiiAPI.Migrations
                     b.ToTable("Resellers", (string)null);
                 });
 
-            modelBuilder.Entity("OcufiiAPI.Models.ResellerAllowedTenantFeature", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("FeatureId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid>("ResellerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FeatureId");
-
-                    b.HasIndex("ResellerId", "FeatureId")
-                        .IsUnique();
-
-                    b.ToTable("ResellerAllowedTenantFeatures", (string)null);
-                });
-
             modelBuilder.Entity("OcufiiAPI.Models.ResellerFeature", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<bool>("CanCreate")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("CanDelete")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("CanEdit")
-                        .HasColumnType("boolean");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -846,19 +792,18 @@ namespace OcufiiAPI.Migrations
                     b.Property<Guid>("FeatureId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("FullAccess")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
-                    b.Property<bool>("OnlyView")
-                        .HasColumnType("boolean");
-
                     b.Property<Guid>("ResellerId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("Right")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(2);
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -1109,9 +1054,6 @@ namespace OcufiiAPI.Migrations
                     b.Property<DateTime>("DateUpdated")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -1206,30 +1148,19 @@ namespace OcufiiAPI.Migrations
                     b.Property<Guid>("FeatureId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("CanCreate")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("CanDelete")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("CanEdit")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
-
-                    b.Property<bool>("FullAccess")
-                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
-                    b.Property<bool>("OnlyView")
-                        .HasColumnType("boolean");
+                    b.Property<string>("Right")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -1529,25 +1460,6 @@ namespace OcufiiAPI.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CreatedByAdmin");
-                });
-
-            modelBuilder.Entity("OcufiiAPI.Models.ResellerAllowedTenantFeature", b =>
-                {
-                    b.HasOne("OcufiiAPI.Models.Feature", "Feature")
-                        .WithMany()
-                        .HasForeignKey("FeatureId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("OcufiiAPI.Models.Reseller", "Reseller")
-                        .WithMany()
-                        .HasForeignKey("ResellerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Feature");
-
-                    b.Navigation("Reseller");
                 });
 
             modelBuilder.Entity("OcufiiAPI.Models.ResellerFeature", b =>

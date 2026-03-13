@@ -23,12 +23,6 @@ namespace OcufiiAPI.Controllers;
 [ApiController]
 [Route("api/auth")]
 [Produces("application/json")]
-[ProducesResponseType(typeof(ApiResponse), 200)]
-[ProducesResponseType(typeof(ProblemDetails), 400)]
-[ProducesResponseType(typeof(ProblemDetails), 401)]
-[ProducesResponseType(typeof(ProblemDetails), 403)]
-[ProducesResponseType(typeof(ProblemDetails), 409)]
-[ProducesResponseType(typeof(ProblemDetails), 500)]
 public class AuthController : ControllerBase
 {
     private readonly IRepository<User> _userRepo;
@@ -59,31 +53,21 @@ public class AuthController : ControllerBase
 
     [HttpPost("login")]
     [AllowAnonymous]
-    [SwaggerOperation(
-        Summary = "User Login",
-        Description = "Authenticates user and returns tokens + stored Firebase device token (if any)")]
-    [SwaggerResponse(200, "Login successful", typeof(ApiResponse))]
-    [SwaggerResponse(400, "Bad request - validation failed")]
-    [SwaggerResponse(401, "Unauthorized - invalid credentials")]
+    [SwaggerOperation(Summary = "User Login", Description = "Authenticates user and returns tokens")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
+        // Only active users (not soft-deleted)
         var user = await _userRepo.Query()
-        .Where(u => u.Email == dto.Email && !u.IsDeleted)
-        .Include(u => u.Role)
-        .Include(u => u.Tenant) 
-        .FirstOrDefaultAsync();
+            .Where(u => u.Email == dto.Email && !u.IsDeleted && u.DeletedAt == null)
+            .Include(u => u.Role)
+            .Include(u => u.Tenant)
+            .FirstOrDefaultAsync();
 
         if (user == null || _hasher.VerifyHashedPassword(user, user.Password, dto.Password) == PasswordVerificationResult.Failed)
-            return Unauthorized(new ApiResponse(false, "Invalid email or password")
-            {
-                ErrorCode = "OC-014"
-            });
+            return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-014" });
 
         if (user.Tenant != null && !user.Tenant.IsActive)
-            return Unauthorized(new ApiResponse(false, "Your tenant account has been deactivated. Contact your reseller.")
-            {
-                ErrorCode = "OC-091" 
-            });
+            return Unauthorized(new ApiResponse(false, "Your tenant account has been deactivated. Contact your reseller.") { ErrorCode = "OC-091" });
 
         var (accessToken, refreshToken) = GenerateTokens(user);
         await SaveRefreshToken(user.UserId, refreshToken);
@@ -120,17 +104,8 @@ public class AuthController : ControllerBase
             ErrorCode = null
         });
     }
-    
+
     [HttpPost("device-token")]
-    [SwaggerOperation(
-        Summary = "Register/Update Firebase Device Token",
-        Description = "Registers or updates the Firebase token for the authenticated user. " +
-                      "Ensures only one active device token per user. " +
-                      "If the token is already used by another user, it will be rejected."
-    )]
-    [SwaggerResponse(200, "Token registered/updated")]
-    [SwaggerResponse(400, "Invalid request")]
-    [SwaggerResponse(409, "Token already in use by another user")]
     public async Task<ActionResult<ApiResponse>> RegisterDeviceToken([FromBody] DeviceTokenRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.DeviceTokenValue))
@@ -138,26 +113,27 @@ public class AuthController : ControllerBase
 
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
-        var tokenUsedByOther = await _db.DeviceToken
-            .AnyAsync(t => t.DeviceTokenValue == request.DeviceTokenValue && t.UserId != userId);
+        var existingToken = await _db.DeviceToken
+            .FirstOrDefaultAsync(t => t.DeviceTokenValue == request.DeviceTokenValue);
 
-        if (tokenUsedByOther)
-            return Conflict(new ApiResponse(false, "This device token is already registered to another user")
+        if (existingToken != null)
+        {
+            if (existingToken.UserId != userId)
             {
-                ErrorCode = "OC-082" 
-            });
+                _db.DeviceToken.Remove(existingToken);
+            }
+        }
 
-        var existingForUser = await _db.DeviceToken
+        var userToken = await _db.DeviceToken
             .FirstOrDefaultAsync(t => t.UserId == userId);
 
-        if (existingForUser != null)
+        if (userToken != null)
         {
-            existingForUser.DeviceTokenValue = request.DeviceTokenValue;
-            existingForUser.MobileDevice = request.MobileDevice;
-            existingForUser.MobileOsVersion = request.MobileOsVersion;
-            existingForUser.Version = request.Version;
-
-            _db.DeviceToken.Update(existingForUser);
+            userToken.DeviceTokenValue = request.DeviceTokenValue;
+            userToken.MobileDevice = request.MobileDevice;
+            userToken.MobileOsVersion = request.MobileOsVersion;
+            userToken.Version = request.Version;
+            _db.DeviceToken.Update(userToken);
         }
         else
         {
@@ -169,7 +145,6 @@ public class AuthController : ControllerBase
                 MobileOsVersion = request.MobileOsVersion,
                 Version = request.Version
             };
-
             _db.DeviceToken.Add(newToken);
         }
 
@@ -183,13 +158,10 @@ public class AuthController : ControllerBase
 
     [HttpPost("register")]
     [AllowAnonymous]
-    [SwaggerOperation(Summary = "User Registration", Description = "Creates a new user account")]
-    [SwaggerResponse(201, "User registered")]
-    [SwaggerResponse(400, "Invalid request")]
-    [SwaggerResponse(409, "Email already exists")]
+    [SwaggerOperation(Summary = "User Registration", Description = "Creates a new user account with default features from reseller")]
     public async Task<IActionResult> Register(
-        [FromBody] RegisterRequestDto dto,
-        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey = null)
+    [FromBody] RegisterRequestDto dto,
+    [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey = null)
     {
         var validator = new RegisterRequestValidator();
         var validationResult = await validator.ValidateAsync(dto);
@@ -197,30 +169,25 @@ public class AuthController : ControllerBase
         {
             return BadRequest(new ApiResponse(false, "Validation failed")
             {
-                Data = new
-                {
-                    errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray()
-                },
+                Data = new { errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray() },
                 ErrorCode = "OC-003"
             });
         }
 
-        var existingUser = await _userRepo.Query().AnyAsync(u => u.Email == dto.Email);
+        var existingUser = await _userRepo.Query()
+            .AnyAsync(u => u.Email == dto.Email && !u.IsDeleted && u.DeletedAt == null);
+
         if (existingUser)
-            return Conflict(new ApiResponse(false, "Email already in use")
-            {
-                ErrorCode = "OC-004"
-            });
+            return Conflict(new ApiResponse(false, "Email already in use") { ErrorCode = "OC-004" });
 
         var role = await _roleRepo.Query()
             .FirstOrDefaultAsync(r => r.RoleName == _legacy.RegistrationRole);
+
         if (role == null)
-            return StatusCode(500, new ApiResponse(false, "Default role not found")
-            {
-                ErrorCode = "OC-005"
-            });
+            return StatusCode(500, new ApiResponse(false, "Default role not found") { ErrorCode = "OC-005" });
 
         var assignedResellerId = dto.AssignedResellerId ?? new Guid("00000000-0000-0000-0000-000000000001");
+
         var newTenant = new Tenant
         {
             ResellerId = Guid.NewGuid(),
@@ -253,47 +220,82 @@ public class AuthController : ControllerBase
             GmtInfo = dto.GtmInfo ?? "",
             AccountType = "single",
             IsEnabled = true,
-            IsDeleted = false
+            IsDeleted = false,
+            DeletedAt = null
         };
 
         await _userRepo.AddAsync(user);
         await _userRepo.SaveAsync();
 
-        var freePlan = new SubscriptionPlan
+        try
         {
-            UserId = user.UserId,
-            PlanType = SubscriptionPlanType.Free,
-            MaxActiveLinks = 1,
-            IsActive = true,
-            ExpiryDate = DateTime.UtcNow.AddYears(10),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+            // Assign default tenant features from the assigned reseller
+            var allowedFeatureIds = await _db.ResellerAllowedTenantFeatures
+                .Where(raf => raf.ResellerId == assignedResellerId && raf.IsEnabled)
+                .Select(raf => raf.FeatureId)
+                .ToListAsync();
 
-        _db.SubscriptionPlans.Add(freePlan);
-        await _db.SaveChangesAsync();
-
-        Log.Information("User registered successfully: {Email} | Idempotency-Key: {Key}", user.Email, idempotencyKey);
-
-        return Created($"/api/users/{user.UserId}", new ApiResponse(true, "Registration successful")
-        {
-            Data = new
+            if (allowedFeatureIds.Any())
             {
-                user.UserId,
-                user.Email,
-                user.FirstName,
-                user.LastName
-            },
-            ErrorCode = null
-        });
+                foreach (var featureId in allowedFeatureIds)
+                {
+                    _db.UserFeatures.Add(new UserFeature
+                    {
+                        UserId = user.UserId,
+                        FeatureId = featureId,
+                        IsEnabled = true,
+                        OnlyView = true,
+                        CanEdit = true,
+                        FullAccess = true,
+                        CanCreate = true,
+                        CanDelete = true,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
+            var freePlan = new SubscriptionPlan
+            {
+                UserId = user.UserId,
+                PlanType = SubscriptionPlanType.Free,
+                MaxActiveLinks = 1,
+                IsActive = true,
+                ExpiryDate = DateTime.UtcNow.AddYears(10),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _db.SubscriptionPlans.Add(freePlan);
+            await _db.SaveChangesAsync();
+
+            Log.Information("User registered successfully: {Email} | Idempotency-Key: {Key}", user.Email, idempotencyKey);
+
+            return Created($"/api/users/{user.UserId}", new ApiResponse(true, "Registration successful")
+            {
+                Data = new
+                {
+                    user.UserId,
+                    user.Email,
+                    user.FirstName,
+                    user.LastName
+                },
+                ErrorCode = null
+            });
+        }
+        catch (Exception ex)
+        {
+            // Rollback
+            _db.Tenants.Remove(newTenant);
+            _db.Users.Remove(user);
+            await _db.SaveChangesAsync();
+            throw; 
+        }
     }
 
     [HttpPost("refresh")]
     [Authorize]
     [SwaggerOperation(Summary = "Refresh Access Token")]
-    [SwaggerResponse(200, "Tokens refreshed")]
-    [SwaggerResponse(400, "Invalid request")]
-    [SwaggerResponse(401, "Invalid or expired refresh token")]
     public async Task<IActionResult> Refresh([FromBody] RefreshDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.RefreshToken))
@@ -338,8 +340,6 @@ public class AuthController : ControllerBase
 
     [HttpPost("logout")]
     [Authorize]
-    [SwaggerOperation(Summary = "User Logout")]
-    [SwaggerResponse(200, "Logged out successfully")]
     public async Task<IActionResult> Logout([FromBody] RefreshDto dto)
     {
         if (!string.IsNullOrWhiteSpace(dto.RefreshToken))
@@ -363,8 +363,6 @@ public class AuthController : ControllerBase
 
     [HttpGet("me")]
     [Authorize]
-    [SwaggerOperation(Summary = "Get Current User Profile")]
-    [SwaggerResponse(200, "Profile retrieved")]
     public async Task<IActionResult> GetProfile()
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
@@ -399,8 +397,6 @@ public class AuthController : ControllerBase
     [HttpPut("change-password")]
     [Authorize]
     [SwaggerOperation(Summary = "Change Password")]
-    [SwaggerResponse(200, "Password changed")]
-    [SwaggerResponse(400, "Invalid current password or validation failed")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
@@ -425,10 +421,6 @@ public class AuthController : ControllerBase
 
     [HttpPut("change-email")]
     [Authorize]
-    [SwaggerOperation(Summary = "Change Email")]
-    [SwaggerResponse(200, "Email changed")]
-    [SwaggerResponse(400, "Invalid request")]
-    [SwaggerResponse(409, "Email already in use")]
     public async Task<IActionResult> ChangeEmail([FromBody] ChangeEmailDto dto)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
@@ -463,48 +455,28 @@ public class AuthController : ControllerBase
 
     [HttpGet("email/{email}/validate")]
     [AllowAnonymous]
-    [SwaggerOperation(
-     Summary = "Check if email is available",
-     Description = "Checks if the email can be used for new user registration"
- )]
-    [SwaggerResponse(200, "Email availability result")]
     public async Task<IActionResult> ValidateEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email))
-            return BadRequest(new ApiResponse(false, "Email is required")
-            {
-                ErrorCode = "OC-080"
-            });
+            return BadRequest(new ApiResponse(false, "Email is required") { ErrorCode = "OC-080" });
 
         email = email.Trim().ToLowerInvariant();
 
         var userExists = await _db.Users
-            .AnyAsync(u => u.Email == email && !u.IsDeleted);
+            .AnyAsync(u => u.Email == email && !u.IsDeleted && u.DeletedAt == null);
 
-        var isTaken = userExists;
-
-        if (isTaken)
+        if (userExists)
         {
             return Ok(new ApiResponse(true, "Email is already in use")
             {
-                Data = new
-                {
-                    email = email,
-                    isAvailable = false,
-                    message = "Email is already in use."
-                },
-                ErrorCode = "OC-081" 
+                Data = new { email, isAvailable = false, message = "Email is already in use." },
+                ErrorCode = "OC-081"
             });
         }
 
         return Ok(new ApiResponse(true, "Email is available")
         {
-            Data = new
-            {
-                email = email,
-                isAvailable = true,
-                message = "Email is available for registration."
-            },
+            Data = new { email, isAvailable = true, message = "Email is available for registration." },
             ErrorCode = null
         });
     }

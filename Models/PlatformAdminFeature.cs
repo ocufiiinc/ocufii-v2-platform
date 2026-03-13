@@ -10,7 +10,11 @@ namespace OcufiiAPI.Models
         public Guid FeatureId { get; set; }
         public Feature Feature { get; set; } = null!;
         public bool IsEnabled { get; set; }
-        public FeatureRight Right { get; set; }
+        public bool OnlyView { get; set; } = false;
+        public bool CanEdit { get; set; } = false;
+        public bool FullAccess { get; set; } = false;
+        public bool CanCreate { get; set; } = false;
+        public bool CanDelete { get; set; } = false;
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

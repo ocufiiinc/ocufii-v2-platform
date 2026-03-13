@@ -26,6 +26,8 @@ namespace OcufiiAPI.Models
         [Column(TypeName = "timestamp with time zone")]
         public DateTime DateUpdated { get; set; } = DateTime.UtcNow;
 
+        public DateTime? DeletedAt { get; set; }
+
         public bool IsDeleted { get; set; } = false;
         public bool IsEnabled { get; set; } = true;
         public bool IsLockedFromTwoStep { get; set; } = false;

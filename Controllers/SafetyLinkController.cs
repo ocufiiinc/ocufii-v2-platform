@@ -21,11 +21,6 @@ using System.Threading.Tasks;
 [Route("api/safetylink")]
 [Authorize]
 [Produces("application/json")]
-[ProducesResponseType(typeof(ApiResponse), 200)]
-[ProducesResponseType(typeof(ApiResponse), 400)]
-[ProducesResponseType(typeof(ApiResponse), 401)]
-[ProducesResponseType(typeof(ApiResponse), 403)]
-[ProducesResponseType(typeof(ApiResponse), 404)]
 public class SafetyLinkController : ControllerBase
 {
     private readonly OcufiiDbContext _db;
@@ -94,136 +89,7 @@ public class SafetyLinkController : ControllerBase
         return Regex.IsMatch(email, @"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$");
     }
 
-    [HttpPost("invite")]
-    [SwaggerOperation(Summary = "Send SafetyLink Invitation", Description = "Sends invitation to link with trusted contact. Checks subscription limits. Allows re-invite after rejection.")]
-    [SwaggerResponse(200, "Invitation sent")]
-    [SwaggerResponse(400, "Invalid email, alias, or subscription limit reached")]
-    [SwaggerResponse(409, "Already linked or pending")]
-    public async Task<ActionResult<ApiResponse>> SendInvitation([FromBody] SendInvitationDto dto)
-    {
-        if (!IsValidEmail(dto.Email))
-            return BadRequest(new ApiResponse(false, "Invalid email format")
-            {
-                ErrorCode = "OC-030"
-            });
-
-        var senderId = User.GetUserId();
-        var sender = await _userRepo.GetByIdAsync(senderId);
-        if (sender == null) return NotFound(new ApiResponse(false, "Sender not found")
-        {
-            ErrorCode = "OC-031"
-        });
-
-        var recipient = await _db.Users.FirstOrDefaultAsync(u => u.Email == dto.Email && !u.IsDeleted);
-        if (recipient == null) return BadRequest(new ApiResponse(false, "Recipient email does not have an account")
-        {
-            ErrorCode = "OC-032"
-        });
-
-        if (recipient.UserId == senderId) return BadRequest(new ApiResponse(false, "Cannot invite yourself")
-        {
-            ErrorCode = "OC-033"
-        });
-
-        if (string.IsNullOrWhiteSpace(dto.AliasName)) return BadRequest(new ApiResponse(false, "AliasName required")
-        {
-            ErrorCode = "OC-034"
-        });
-
-        var existingLink = await _safetyLinkRepo.Query()
-            .FirstOrDefaultAsync(l => l.SenderId == senderId && l.RecipientId == recipient.UserId);
-
-        var senderName = string.Empty;
-        var bodyTemplate = string.Empty;
-        var body = string.Empty;
-
-        if (existingLink != null)
-        {
-            if (existingLink.Status == SafetyLinkStatus.Pending)
-                return Conflict(new ApiResponse(false, "Invitation is already pending – use Resend OTP instead")
-                {
-                    ErrorCode = "OC-035"
-                });
-
-            if (existingLink.Status == SafetyLinkStatus.Accepted)
-                return Conflict(new ApiResponse(false, "Already linked")
-                {
-                    ErrorCode = "OC-036"
-                });
-
-            existingLink.Status = SafetyLinkStatus.Pending;
-            existingLink.AliasName = dto.AliasName;
-            existingLink.EnableLocation = dto.EnableLocation;
-            existingLink.EnableSafety = dto.EnableSafety;
-            existingLink.EnableSecurity = dto.EnableSecurity;
-            existingLink.OTP = GenerateOTP();
-            existingLink.OTPExpiry = DateTime.UtcNow.AddHours(48);
-            existingLink.UpdatedAt = DateTime.UtcNow;
-
-            _safetyLinkRepo.Update(existingLink);
-            await _safetyLinkRepo.SaveAsync();
-
-            senderName = $"{sender.FirstName} {sender.LastName}".Trim();
-            bodyTemplate = dto.EnableLocation ? _emailTemplates.InvitationBodyWithLocation : _emailTemplates.InvitationBodyWithoutLocation;
-            body = bodyTemplate.Replace("{recipientName}", recipient.FirstName ?? recipient.Email)
-                               .Replace("{senderName}", senderName)
-                               .Replace("{code}", existingLink.OTP);
-
-            await _emailService.SendEmailAsync(recipient.Email, _emailTemplates.InvitationSubject, body, isHtml: true);
-
-            return Ok(new ApiResponse(true, "Invitation re-sent successfully")
-            {
-                ErrorCode = null
-            });
-        }
-
-        var subscription = await GetUserSubscription(senderId);
-        var activeCount = await _safetyLinkRepo.Query()
-            .CountAsync(l => l.SenderId == senderId && l.Status == SafetyLinkStatus.Accepted);
-
-        int maxLinks = subscription.PlanType == SubscriptionPlanType.AddOn ? 6 : 1;
-        if (activeCount >= maxLinks)
-            return BadRequest(new ApiResponse(false, $"Subscription limit reached ({activeCount}/{maxLinks} active links)")
-            {
-                ErrorCode = "OC-037"
-            });
-
-        var link = new SafetyLink
-        {
-            SenderId = senderId,
-            RecipientId = recipient.UserId,
-            Status = SafetyLinkStatus.Pending,
-            AliasName = dto.AliasName,
-            EnableLocation = dto.EnableLocation,
-            EnableSafety = dto.EnableSafety,
-            EnableSecurity = dto.EnableSecurity,
-            OTP = GenerateOTP(),
-            OTPExpiry = DateTime.UtcNow.AddMinutes(30),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        await _safetyLinkRepo.AddAsync(link);
-        await _safetyLinkRepo.SaveAsync();
-
-        senderName = $"{sender.FirstName} {sender.LastName}".Trim();
-        bodyTemplate = dto.EnableLocation ? _emailTemplates.InvitationBodyWithLocation : _emailTemplates.InvitationBodyWithoutLocation;
-        body = bodyTemplate.Replace("{recipientName}", recipient.FirstName ?? recipient.Email)
-                           .Replace("{senderName}", senderName)
-                           .Replace("{code}", link.OTP);
-
-        await _emailService.SendEmailAsync(recipient.Email, _emailTemplates.InvitationSubject, body, isHtml: true);
-
-        return Ok(new ApiResponse(true, "Invitation sent successfully")
-        {
-            ErrorCode = null
-        });
-    }
-
     [HttpPost("resend-invite/{linkId:guid}")]
-    [SwaggerOperation(Summary = "Resend Invitation OTP", Description = "Resends OTP for a pending invitation.")]
-    [SwaggerResponse(200, "OTP resent")]
-    [SwaggerResponse(404, "Link not found")]
     public async Task<ActionResult<ApiResponse>> ResendInvitation(Guid linkId)
     {
         var senderId = User.GetUserId();
@@ -374,26 +240,112 @@ public class SafetyLinkController : ControllerBase
         });
     }
 
+    [HttpPost("invite")]
+    [SwaggerOperation(Summary = "Send SafetyLink Invitation", Description = "Sends invitation to link with trusted contact. Checks subscription limits. Allows re-invite after rejection.")]
+    public async Task<ActionResult<ApiResponse>> SendInvitation([FromBody] SendInvitationDto dto)
+    {
+        if (!IsValidEmail(dto.Email))
+            return BadRequest(new ApiResponse(false, "Invalid email format") { ErrorCode = "OC-030" });
+
+        var senderId = User.GetUserId();
+        var sender = await _userRepo.GetByIdAsync(senderId);
+        if (sender == null) return NotFound(new ApiResponse(false, "Sender not found") { ErrorCode = "OC-031" });
+
+        var recipient = await _db.Users.FirstOrDefaultAsync(u => u.Email == dto.Email && !u.IsDeleted);
+        if (recipient == null) return BadRequest(new ApiResponse(false, "Recipient email does not have an account") { ErrorCode = "OC-032" });
+
+        if (recipient.UserId == senderId) return BadRequest(new ApiResponse(false, "Cannot invite yourself") { ErrorCode = "OC-033" });
+
+        if (string.IsNullOrWhiteSpace(dto.AliasName)) return BadRequest(new ApiResponse(false, "AliasName required") { ErrorCode = "OC-034" });
+
+        var existingLink = await _safetyLinkRepo.Query()
+            .FirstOrDefaultAsync(l => l.SenderId == senderId && l.RecipientId == recipient.UserId);
+
+        string senderName = $"{sender.FirstName} {sender.LastName}".Trim();
+        string bodyTemplate = dto.EnableLocation ? _emailTemplates.InvitationBodyWithLocation : _emailTemplates.InvitationBodyWithoutLocation;
+        string body = string.Empty;
+
+        if (existingLink != null)
+        {
+            if (existingLink.Status == SafetyLinkStatus.Pending)
+                return Conflict(new ApiResponse(false, "Invitation is already pending – use Resend OTP instead") { ErrorCode = "OC-035" });
+
+            if (existingLink.Status == SafetyLinkStatus.Accepted)
+                return Conflict(new ApiResponse(false, "Already linked") { ErrorCode = "OC-036" });
+
+            existingLink.Status = SafetyLinkStatus.Pending;
+            existingLink.AliasName = dto.AliasName;
+            existingLink.EnableLocation = dto.EnableLocation;
+            existingLink.EnableSafety = dto.EnableSafety;
+            existingLink.EnableSecurity = dto.EnableSecurity;
+            existingLink.OTP = GenerateOTP();
+            existingLink.OTPExpiry = DateTime.UtcNow.AddHours(48);
+            existingLink.UpdatedAt = DateTime.UtcNow;
+            _safetyLinkRepo.Update(existingLink);
+            await _safetyLinkRepo.SaveAsync();
+
+            body = bodyTemplate.Replace("{recipientName}", recipient.FirstName ?? recipient.Email)
+                               .Replace("{senderName}", senderName)
+                               .Replace("{code}", existingLink.OTP);
+
+            await _emailService.SendEmailAsync(recipient.Email, _emailTemplates.InvitationSubject, body, isHtml: true);
+
+            return Ok(new ApiResponse(true, "Invitation re-sent successfully") { ErrorCode = null });
+        }
+
+        var subscription = await GetUserSubscription(senderId);
+        var activeCount = await _safetyLinkRepo.Query()
+            .CountAsync(l => l.SenderId == senderId && l.Status == SafetyLinkStatus.Accepted);
+
+        int maxLinks = subscription.PlanType == SubscriptionPlanType.AddOn ? 6 : 1;
+        if (activeCount >= maxLinks)
+            return BadRequest(new ApiResponse(false, $"Subscription limit reached ({activeCount}/{maxLinks} active links)") { ErrorCode = "OC-037" });
+
+        var link = new SafetyLink
+        {
+            SenderId = senderId,
+            RecipientId = recipient.UserId,
+            Status = SafetyLinkStatus.Pending,
+            AliasName = dto.AliasName,
+            EnableLocation = dto.EnableLocation,
+            EnableSafety = dto.EnableSafety,
+            EnableSecurity = dto.EnableSecurity,
+            OTP = GenerateOTP(),
+            OTPExpiry = DateTime.UtcNow.AddMinutes(30),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await _safetyLinkRepo.AddAsync(link);
+        await _safetyLinkRepo.SaveAsync();
+
+        body = bodyTemplate.Replace("{recipientName}", recipient.FirstName ?? recipient.Email)
+                           .Replace("{senderName}", senderName)
+                           .Replace("{code}", link.OTP);
+
+        await _emailService.SendEmailAsync(recipient.Email, _emailTemplates.InvitationSubject, body, isHtml: true);
+
+        return Ok(new ApiResponse(true, "Invitation sent successfully") { ErrorCode = null });
+    }
+
     [HttpPost("accept-invitation")]
+    [SwaggerOperation(Summary = "Accept SafetyLink Invitation", Description = "Accepts a pending invitation and creates the reverse bidirectional link if not already present.")]
     public async Task<ActionResult<ApiResponse>> AcceptInvitation([FromBody] AcceptInvitationDto dto)
     {
         var recipientId = User.GetUserId();
+
         var link = await _safetyLinkRepo.Query()
-            .FirstOrDefaultAsync(l => l.RecipientId == recipientId && l.Status == SafetyLinkStatus.Pending);
+            .FirstOrDefaultAsync(l => l.RecipientId == recipientId
+                                   && l.Status == SafetyLinkStatus.Pending);
 
         if (link == null)
-            return NotFound(new ApiResponse(false, "Pending invitation not found")
-            {
-                ErrorCode = "OC-045"
-            });
+            return NotFound(new ApiResponse(false, "Pending invitation not found") { ErrorCode = "OC-045" });
 
         if (link.OTPExpiry < DateTime.UtcNow || link.OTP != dto.OTP)
-            return BadRequest(new ApiResponse(false, "Invalid or expired OTP")
-            {
-                ErrorCode = "OC-046"
-            });
+            return BadRequest(new ApiResponse(false, "Invalid or expired OTP") { ErrorCode = "OC-046" });
 
         var senderId = link.SenderId;
+
         var subscription = await GetUserSubscription(senderId);
         var currentActiveCount = await _safetyLinkRepo.Query()
             .CountAsync(l => l.SenderId == senderId && l.Status == SafetyLinkStatus.Accepted);
@@ -404,32 +356,64 @@ public class SafetyLinkController : ControllerBase
             link.Status = SafetyLinkStatus.Inactive;
             link.UpdatedAt = DateTime.UtcNow;
             await _safetyLinkRepo.SaveAsync();
-
             return BadRequest(new ApiResponse(false,
                 $"Cannot accept - sender has reached their subscription limit ({currentActiveCount}/{maxAllowed} active links)")
-            {
-                ErrorCode = "OC-047"
-            });
+            { ErrorCode = "OC-047" });
         }
 
         link.Status = SafetyLinkStatus.Accepted;
         link.OTP = string.Empty;
         link.OTPExpiry = null;
         link.UpdatedAt = DateTime.UtcNow;
+        _safetyLinkRepo.Update(link);
+
+        var existingReverse = await _safetyLinkRepo.Query()
+            .FirstOrDefaultAsync(l => l.SenderId == recipientId && l.RecipientId == senderId);
+
+        if (existingReverse == null)
+        {
+            var reverseLink = new SafetyLink
+            {
+                SenderId = recipientId,
+                RecipientId = senderId,
+                Status = SafetyLinkStatus.Accepted,
+                AliasName = $"From {User.FindFirst("name")?.Value ?? "User"}",
+                EnableLocation = link.EnableLocation,
+                EnableSafety = link.EnableSafety,
+                EnableSecurity = link.EnableSecurity,
+                Snooze = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _safetyLinkRepo.AddAsync(reverseLink);
+        }
+        else
+        {
+            if (existingReverse.Status != SafetyLinkStatus.Accepted)
+            {
+                existingReverse.Status = SafetyLinkStatus.Accepted;
+                existingReverse.UpdatedAt = DateTime.UtcNow;
+                _safetyLinkRepo.Update(existingReverse);
+            }
+        }
 
         await _safetyLinkRepo.SaveAsync();
 
-        return Ok(new ApiResponse(true, "Invitation accepted successfully")
+        return Ok(new ApiResponse(true, "Invitation accepted and bidirectional link created/verified")
         {
             ErrorCode = null
         });
     }
 
     [HttpGet("linked-members")]
-    [SwaggerOperation(Summary = "Get Linked Members", Description = "Returns bidirectional linked members. After acceptance, the same link appears in both Outbound and Inbound for symmetry.")]
     public async Task<ActionResult<ApiResponse>> GetLinkedMembers()
     {
         var userId = User.GetUserId();
+        var myEmail = await _db.Users
+        .Where(u => u.UserId == userId)
+        .Select(u => u.Email)
+        .FirstOrDefaultAsync() ?? "unknown@email.com";
 
         var allLinks = await _safetyLinkRepo.Query()
             .Where(l => (l.SenderId == userId || l.RecipientId == userId)
@@ -437,10 +421,10 @@ public class SafetyLinkController : ControllerBase
             .Select(l => new
             {
                 LinkId = l.Id,
-                Email = l.SenderId == userId
+                OtherEmail = l.SenderId == userId
                     ? _db.Users.Where(u => u.UserId == l.RecipientId).Select(u => u.Email).FirstOrDefault()
                     : _db.Users.Where(u => u.UserId == l.SenderId).Select(u => u.Email).FirstOrDefault(),
-                AliasName = l.AliasName,
+                AliasName = l.AliasName ?? "No alias set",
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
                 EnableSafety = l.EnableSafety,
@@ -449,39 +433,45 @@ public class SafetyLinkController : ControllerBase
                 SnoozeStartTime = l.SnoozeStartTime,
                 SnoozeEndTime = l.SnoozeEndTime,
                 IsOtpExpired = false,
-                IsOutbound = l.SenderId == userId 
+                IsOutbound = l.SenderId == userId
             })
             .ToListAsync();
 
-        var outbound = allLinks.Where(l => l.IsOutbound).Select(l => new LinkedMemberDto
-        {
-            LinkId = l.LinkId,
-            Email = l.Email,
-            AliasName = l.AliasName,
-            Status = l.Status,
-            EnableLocation = l.EnableLocation,
-            EnableSafety = l.EnableSafety,
-            EnableSecurity = l.EnableSecurity,
-            Snooze = l.Snooze,
-            SnoozeStartTime = l.SnoozeStartTime,
-            SnoozeEndTime = l.SnoozeEndTime,
-            IsOtpExpired = l.IsOtpExpired
-        }).ToList();
+        var outbound = allLinks
+            .Where(l => l.IsOutbound)
+            .Select(l => new LinkedMemberDto
+            {
+                LinkId = l.LinkId,
+                Email = myEmail,
+                AliasName = l.AliasName,
+                Status = l.Status,
+                EnableLocation = l.EnableLocation,
+                EnableSafety = l.EnableSafety,
+                EnableSecurity = l.EnableSecurity,
+                Snooze = l.Snooze,
+                SnoozeStartTime = l.SnoozeStartTime,
+                SnoozeEndTime = l.SnoozeEndTime,
+                IsOtpExpired = l.IsOtpExpired
+            })
+            .ToList();
 
-        var inbound = allLinks.Where(l => !l.IsOutbound).Select(l => new LinkedMemberDto
-        {
-            LinkId = l.LinkId,
-            Email = l.Email,
-            AliasName = l.AliasName,
-            Status = l.Status,
-            EnableLocation = l.EnableLocation,
-            EnableSafety = l.EnableSafety,
-            EnableSecurity = l.EnableSecurity,
-            Snooze = l.Snooze,
-            SnoozeStartTime = l.SnoozeStartTime,
-            SnoozeEndTime = l.SnoozeEndTime,
-            IsOtpExpired = l.IsOtpExpired
-        }).ToList();
+        var inbound = allLinks
+            .Where(l => !l.IsOutbound)
+            .Select(l => new LinkedMemberDto
+            {
+                LinkId = l.LinkId,
+                Email = l.OtherEmail,
+                AliasName = l.AliasName,
+                Status = l.Status,
+                EnableLocation = l.EnableLocation,
+                EnableSafety = l.EnableSafety,
+                EnableSecurity = l.EnableSecurity,
+                Snooze = l.Snooze,
+                SnoozeStartTime = l.SnoozeStartTime,
+                SnoozeEndTime = l.SnoozeEndTime,
+                IsOtpExpired = l.IsOtpExpired
+            })
+            .ToList();
 
         return Ok(new ApiResponse(true, "Linked members retrieved")
         {
@@ -491,12 +481,6 @@ public class SafetyLinkController : ControllerBase
     }
 
     [HttpDelete("delete-linked/{linkId:guid}")]
-    [SwaggerOperation(
-    Summary = "Delete Linked Member",
-    Description = "Deletes a SafetyLink entry regardless of status."
-)]
-    [SwaggerResponse(200, "Linked member deleted")]
-    [SwaggerResponse(404, "Link not found")]
     public async Task<ActionResult<ApiResponse>> DeleteLinkedMember(Guid linkId)
     {
         var userId = User.GetUserId();
@@ -520,9 +504,6 @@ public class SafetyLinkController : ControllerBase
     }
 
     [HttpPost("test-notification/{linkId:guid}")]
-    [SwaggerOperation(Summary = "Send Test Notification", Description = "Sends a test notification to a linked member.")]
-    [SwaggerResponse(200, "Test notification sent")]
-    [SwaggerResponse(404, "Link not found")]
     public async Task<ActionResult<ApiResponse>> SendTestNotification(Guid linkId)
     {
         var senderId = User.GetUserId();
@@ -547,8 +528,6 @@ public class SafetyLinkController : ControllerBase
     }
 
     [HttpGet("subscription")]
-    [SwaggerOperation(Summary = "Get Subscription Details", Description = "Returns user's subscription plan and active links count.")]
-    [SwaggerResponse(200, "Subscription retrieved")]
     public async Task<ActionResult<ApiResponse>> GetSubscription()
     {
         var userId = User.GetUserId();

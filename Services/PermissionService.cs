@@ -1,6 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using OcufiiAPI.Data;
-using OcufiiAPI.Enums;
 using System.Security.Claims;
 
 namespace OcufiiAPI.Services;
@@ -14,10 +13,7 @@ public class PermissionService
         _db = db;
     }
 
-    public async Task<bool> CanPerformAsync(
-        ClaimsPrincipal user,
-        string featureKey,
-        FeatureRight requiredRight)
+    public async Task<bool> CanPerformAsync(ClaimsPrincipal user, string featureKey, string requiredRight)
     {
         var userType = user.FindFirst("user_type")?.Value;
         var userIdStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -35,12 +31,24 @@ public class PermissionService
             if (admin.Role == "super_admin")
                 return true;
 
-            return await _db.PlatformAdminFeatures
-                .AnyAsync(paf =>
+            var assignment = await _db.PlatformAdminFeatures
+                .Include(paf => paf.Feature)
+                .FirstOrDefaultAsync(paf =>
                     paf.AdminId == userId &&
                     paf.Feature.Key == featureKey &&
-                    paf.IsEnabled &&
-                    (int)paf.Right >= (int)requiredRight);
+                    paf.IsEnabled);
+
+            if (assignment == null) return false;
+
+            return requiredRight.ToLower() switch
+            {
+                "onlyview" => assignment.OnlyView,
+                "canedit" => assignment.CanEdit,
+                "fullaccess" => assignment.FullAccess,
+                "cancreate" => assignment.CanCreate,
+                "candelete" => assignment.CanDelete,
+                _ => false
+            };
         }
         else if (userType == "reseller")
         {

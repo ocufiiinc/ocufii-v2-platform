@@ -52,6 +52,49 @@ namespace OcufiiAPI.Controllers
             return Ok(new { count = tables.Count, tables });
         }
 
+        [HttpGet("table/{tableName}")]
+        public async Task<IActionResult> DumpTable(string tableName)
+        {
+            if (!AllowAll) return Forbid();
+
+            var entityType = _db.Model.GetEntityTypes()
+                .FirstOrDefault(t => string.Equals(t.GetTableName(), tableName, StringComparison.OrdinalIgnoreCase));
+
+            if (entityType == null)
+                return NotFound($"Table '{tableName}' not found");
+
+            try
+            {
+                var sql = $"SELECT * FROM \"{tableName}\"";
+                var connection = _db.Database.GetDbConnection();
+                var wasOpen = connection.State == System.Data.ConnectionState.Open;
+                if (!wasOpen) await connection.OpenAsync();
+
+                using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                using var reader = await command.ExecuteReaderAsync();
+
+                var results = new List<Dictionary<string, object>>();
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[reader.GetName(i)] = val;
+                    }
+                    results.Add(row);
+                }
+                if (!wasOpen) connection.Close();
+
+                return Ok(new { table = tableName, count = results.Count, data = results });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = "Query failed", details = ex.Message });
+            }
+        }
+
         [HttpPost("test-gateway-filter")]
         public async Task<IActionResult> TestGatewayFilterWithAcknowledgement([FromBody] TestGatewayFilterRequest request)
         {

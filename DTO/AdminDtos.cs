@@ -10,6 +10,15 @@ namespace OcufiiAPI.DTO
         public string? CustomWorkflows { get; set; }
     }
 
+    public class FeatureDto
+    {
+        public Guid Id { get; set; }
+        public string Key { get; set; }
+        public string Name { get; set; }
+        public string Description { get; set; }
+    }
+
+
     public class CreateUserRequest
     {
         public string Email { get; set; } = string.Empty;
@@ -64,7 +73,7 @@ namespace OcufiiAPI.DTO
         public string Email { get; set; } = string.Empty;
         public string FirstName { get; set; } = string.Empty;
         public string? LastName { get; set; }
-        public string? Role { get; set; }
+        public string? PhoneNumber { get; set; }
         public List<FeatureAssignmentDto>? Features { get; set; }
     }
 
@@ -74,6 +83,7 @@ namespace OcufiiAPI.DTO
         public string Email { get; set; } = string.Empty;
         public string? ContactName { get; set; }
         public string? PhoneNumber { get; set; }
+        public List<FeatureAssignmentDto>? AllowedTenantFeatures { get; set; }
     }
 
     public class AdminUpdateStatusDto
@@ -91,11 +101,13 @@ namespace OcufiiAPI.DTO
         public string? Name { get; set; }
         public string? ContactName { get; set; }
         public string? PhoneNumber { get; set; }
+        public List<FeatureAssignmentDto>? AllowedTenantFeatures { get; set; }
     }
 
     public class UpdateTenantDto
     {
         public string? Name { get; set; }
+        public List<FeatureAssignmentDto>? TenantFeatures { get; set; }
     }
 
     public class MoveTenantDto
@@ -108,11 +120,13 @@ namespace OcufiiAPI.DTO
         public string OwnerEmail { get; set; } = string.Empty;
         public string OwnerFirstName { get; set; } = string.Empty;
         public string? OwnerLastName { get; set; }
+        public string PhoneNumber { get; set; } = string.Empty;
+        public List<FeatureAssignmentDto>? TenantFeatures { get; set; }
+
     }
 
     public class UpdatePlatformPermissionsDto
     {
-        public string? Role { get; set; }
         public List<FeatureAssignmentDto>? Features { get; set; }
     }
 
@@ -120,6 +134,10 @@ namespace OcufiiAPI.DTO
     {
         public Guid FeatureId { get; set; }
         public bool IsEnabled { get; set; }
-        public int Right { get; set; } // 0-4
+        public bool OnlyView { get; set; } = false;
+        public bool CanEdit { get; set; } = false;
+        public bool FullAccess { get; set; } = false;
+        public bool CanCreate { get; set; } = false;
+        public bool CanDelete { get; set; } = false;
     }
 }

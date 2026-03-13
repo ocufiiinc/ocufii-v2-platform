@@ -198,29 +198,24 @@ namespace OcufiiAPI.Controllers
 
         [HttpDelete("{id:guid}")]
         [Authorize(Policy = "CanEditOwnProfile")]
-        [SwaggerOperation(
-            Summary = "Delete User (Soft Delete)",
-            Description = "Soft-deletes the user account (sets IsDeleted = true). Only the user themselves or admins can delete."
-        )]
-        [SwaggerResponse(204, "User deleted")]
-        [SwaggerResponse(401, "Unauthorized")]
-        [SwaggerResponse(403, "Forbidden - not authorized")]
-        [SwaggerResponse(404, "User not found")]
+        [SwaggerOperation(Summary = "Delete User (Soft Delete)", Description = "Soft-deletes the user account.")]
         public async Task<IActionResult> Delete(Guid id)
         {
             var user = await _userRepo.GetByIdAsync(id);
-            if (user == null || user.IsDeleted) return NotFound(new ApiResponse(false, "User not found")
-            {
-                ErrorCode = "OC-055"
-            });
+            if (user == null || user.IsDeleted)
+                return NotFound(new ApiResponse(false, "User not found") { ErrorCode = "OC-055" });
 
             user.IsDeleted = true;
+            user.DeletedAt = DateTime.UtcNow;
             user.DateUpdated = DateTime.UtcNow;
 
             _userRepo.Update(user);
             await _userRepo.SaveAsync();
 
-            return NoContent();
+            return Ok(new ApiResponse(true, "User deleted")
+            {
+                ErrorCode = null
+            });
         }
     }
 }
