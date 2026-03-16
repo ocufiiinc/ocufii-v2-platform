@@ -35,6 +35,14 @@ namespace OcufiiAPI.Data
         public DbSet<ResellerFeature> ResellerFeatures { get; set; }
         public DbSet<ResellerAllowedTenantFeature> ResellerAllowedTenantFeatures { get; set; }
 
+        public DbSet<Permission> Permissions { get; set; } = null!;
+        public DbSet<RolePermission> RolePermissions { get; set; } = null!;
+        public DbSet<PlatformPermission> PlatformPermissions { get; set; } = null!;
+        public DbSet<ResellerPermission> ResellerPermissions { get; set; } = null!;
+        public DbSet<TenantPermission> TenantPermissions { get; set; } = null!;
+        public DbSet<MembershipPermission> MembershipPermissions { get; set; } = null!;
+        public DbSet<TenantFeature> TenantFeatures { get; set; } = null!;
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<DeviceToken>(entity =>
@@ -481,6 +489,88 @@ namespace OcufiiAPI.Data
 
                 entity.HasIndex(e => new { e.ResellerId, e.FeatureId })
                     .IsUnique();
+            });
+
+            modelBuilder.Entity<Permission>(entity =>
+            {
+                entity.ToTable("Permissions");
+                entity.HasKey(e => e.PermissionId);
+                entity.Property(e => e.Key).IsRequired().HasMaxLength(100);
+                entity.HasIndex(e => e.Key).IsUnique();
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+                entity.Property(e => e.Category).HasDefaultValue("account");
+                entity.Property(e => e.IsDefault).HasDefaultValue(false);
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+                entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            });
+
+            modelBuilder.Entity<RolePermission>(entity =>
+            {
+                entity.ToTable("RolePermissions");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Role).WithMany().HasForeignKey(e => e.RoleId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Permission).WithMany().HasForeignKey(e => e.PermissionId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.UpdatedByAdmin).WithMany().HasForeignKey(e => e.UpdatedByAdminId).OnDelete(DeleteBehavior.SetNull);
+                entity.HasIndex(e => new { e.RoleId, e.PermissionId }).IsUnique();
+            });
+
+            modelBuilder.Entity<PlatformPermission>(entity =>
+            {
+                entity.ToTable("PlatformPermissions");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Admin).WithMany().HasForeignKey(e => e.AdminId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Permission).WithMany().HasForeignKey(e => e.PermissionId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.GrantedByAdmin).WithMany().HasForeignKey(e => e.GrantedByAdminId).OnDelete(DeleteBehavior.Restrict);
+                entity.HasIndex(e => new { e.AdminId, e.PermissionId }).IsUnique();
+            });
+
+            modelBuilder.Entity<ResellerPermission>(entity =>
+            {
+                entity.ToTable("ResellerPermissions");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Reseller).WithMany().HasForeignKey(e => e.ResellerId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Permission).WithMany().HasForeignKey(e => e.PermissionId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.GrantedByAdmin).WithMany().HasForeignKey(e => e.GrantedByAdminId).OnDelete(DeleteBehavior.Restrict);
+                entity.HasIndex(e => new { e.ResellerId, e.PermissionId }).IsUnique();
+            });
+
+            modelBuilder.Entity<TenantPermission>(entity =>
+            {
+                entity.ToTable("TenantPermissions");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Permission).WithMany().HasForeignKey(e => e.PermissionId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.GrantedByReseller).WithMany().HasForeignKey(e => e.GrantedByResellerId).OnDelete(DeleteBehavior.Restrict);
+                entity.HasIndex(e => new { e.TenantId, e.PermissionId }).IsUnique();
+            });
+
+            modelBuilder.Entity<MembershipPermission>(entity =>
+            {
+                entity.ToTable("MembershipPermissions");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.User).WithMany(u => u.MembershipPermissions).HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Permission).WithMany().HasForeignKey(e => e.PermissionId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.GrantedByUser).WithMany().HasForeignKey(e => e.GrantedByUserId).OnDelete(DeleteBehavior.Restrict);
+                entity.HasIndex(e => new { e.UserId, e.PermissionId }).IsUnique();
+            });
+
+            modelBuilder.Entity<TenantFeature>(entity =>
+            {
+                entity.ToTable("TenantFeatures");
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.Tenant)
+                      .WithMany()
+                      .HasForeignKey(e => e.TenantId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Feature)
+                      .WithMany()
+                      .HasForeignKey(e => e.FeatureId)
+                      .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.GrantedByReseller)
+                      .WithMany()
+                      .HasForeignKey(e => e.GrantedByResellerId)
+                      .OnDelete(DeleteBehavior.Restrict);
+                entity.HasIndex(e => new { e.TenantId, e.FeatureId }).IsUnique();
             });
 
             var dateTimeProperties = modelBuilder.Model.GetEntityTypes()

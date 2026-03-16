@@ -158,10 +158,10 @@ public class AuthController : ControllerBase
 
     [HttpPost("register")]
     [AllowAnonymous]
-    [SwaggerOperation(Summary = "User Registration", Description = "Creates a new user account with default features from reseller")]
+    [SwaggerOperation(Summary = "User Registration", Description = "Creates a new tenant user account with default permissions & features from reseller")]
     public async Task<IActionResult> Register(
-    [FromBody] RegisterRequestDto dto,
-    [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey = null)
+            [FromBody] RegisterRequestDto dto,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey = null)
     {
         var validator = new RegisterRequestValidator();
         var validationResult = await validator.ValidateAsync(dto);
@@ -174,19 +174,19 @@ public class AuthController : ControllerBase
             });
         }
 
-        var existingUser = await _userRepo.Query()
+        var existingUser = await _db.Users
             .AnyAsync(u => u.Email == dto.Email && !u.IsDeleted && u.DeletedAt == null);
 
         if (existingUser)
             return Conflict(new ApiResponse(false, "Email already in use") { ErrorCode = "OC-004" });
 
-        var role = await _roleRepo.Query()
-            .FirstOrDefaultAsync(r => r.RoleName == _legacy.RegistrationRole);
+        var role = await _db.Roles
+            .FirstOrDefaultAsync(r => r.RoleName == "account_owner");
 
         if (role == null)
             return StatusCode(500, new ApiResponse(false, "Default role not found") { ErrorCode = "OC-005" });
 
-        var assignedResellerId = dto.AssignedResellerId ?? new Guid("00000000-0000-0000-0000-000000000001");
+        var assignedResellerId = new Guid("00000000-0000-0000-0000-000000000001");
 
         var newTenant = new Tenant
         {
@@ -195,7 +195,8 @@ public class AuthController : ControllerBase
             DateCreated = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
             ThemeConfig = "{}",
-            CustomWorkflows = "[]"
+            CustomWorkflows = "[]",
+            IsActive = true
         };
 
         _db.Tenants.Add(newTenant);
@@ -224,37 +225,56 @@ public class AuthController : ControllerBase
             DeletedAt = null
         };
 
-        await _userRepo.AddAsync(user);
-        await _userRepo.SaveAsync();
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
 
         try
         {
-            // Assign default tenant features from the assigned reseller
-            var allowedFeatureIds = await _db.ResellerAllowedTenantFeatures
-                .Where(raf => raf.ResellerId == assignedResellerId && raf.IsEnabled)
-                .Select(raf => raf.FeatureId)
+
+            var allowedTenantPermIds = await _db.ResellerPermissions
+                .Where(rp => rp.ResellerId == assignedResellerId && rp.IsGranted)
+                .Join(_db.Permissions,
+                      rp => rp.PermissionId,
+                      p => p.PermissionId,
+                      (rp, p) => new { p.PermissionId, p.Category })
+                .Where(x => x.Category == "account")
+                .Select(x => x.PermissionId)
                 .ToListAsync();
 
-            if (allowedFeatureIds.Any())
+            foreach (var permId in allowedTenantPermIds)
             {
-                foreach (var featureId in allowedFeatureIds)
+                _db.TenantPermissions.Add(new TenantPermission
                 {
-                    _db.UserFeatures.Add(new UserFeature
-                    {
-                        UserId = user.UserId,
-                        FeatureId = featureId,
-                        IsEnabled = true,
-                        OnlyView = true,
-                        CanEdit = true,
-                        FullAccess = true,
-                        CanCreate = true,
-                        CanDelete = true,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    });
-                }
+                    TenantId = newTenant.ResellerId,
+                    PermissionId = permId,
+                    IsGranted = true,  // default granted
+                    GrantedByResellerId = assignedResellerId,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
             }
 
+            // Get features the assigned reseller has enabled
+            var allowedFeatureIds = await _db.ResellerFeatures
+                .Where(rf => rf.ResellerId == assignedResellerId && rf.IsEnabled)
+                .Select(rf => rf.FeatureId)
+                .ToListAsync();
+
+            // Assign default tenant features
+            foreach (var featureId in allowedFeatureIds)
+            {
+                _db.TenantFeatures.Add(new TenantFeature
+                {
+                    TenantId = newTenant.ResellerId,
+                    FeatureId = featureId,
+                    IsEnabled = true,
+                    GrantedByResellerId = assignedResellerId,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            // Free plan subscription (unchanged)
             var freePlan = new SubscriptionPlan
             {
                 UserId = user.UserId,
@@ -285,11 +305,12 @@ public class AuthController : ControllerBase
         }
         catch (Exception ex)
         {
-            // Rollback
             _db.Tenants.Remove(newTenant);
             _db.Users.Remove(user);
             await _db.SaveChangesAsync();
-            throw; 
+
+            Log.Error(ex, "Registration failed for {Email}", dto.Email);
+            return StatusCode(500, new ApiResponse(false, "Registration failed. Please try again.") { ErrorCode = "OC-999" });
         }
     }
 

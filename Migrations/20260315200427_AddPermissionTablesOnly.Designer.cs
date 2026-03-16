@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OcufiiAPI.Data;
@@ -11,9 +12,11 @@ using OcufiiAPI.Data;
 namespace OcufiiAPI.Migrations
 {
     [DbContext(typeof(OcufiiDbContext))]
-    partial class OcufiiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260315200427_AddPermissionTablesOnly")]
+    partial class AddPermissionTablesOnly
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -970,9 +973,6 @@ namespace OcufiiAPI.Migrations
                     b.Property<bool>("FullAccess")
                         .HasColumnType("boolean");
 
-                    b.Property<Guid>("GrantedByAdminId")
-                        .HasColumnType("uuid");
-
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -992,8 +992,6 @@ namespace OcufiiAPI.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FeatureId");
-
-                    b.HasIndex("GrantedByAdminId");
 
                     b.HasIndex("ResellerId", "FeatureId")
                         .IsUnique();
@@ -1285,42 +1283,6 @@ namespace OcufiiAPI.Migrations
                     b.HasIndex("AssignedResellerId");
 
                     b.ToTable("Tenants", (string)null);
-                });
-
-            modelBuilder.Entity("OcufiiAPI.Models.TenantFeature", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("FeatureId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("GrantedByResellerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FeatureId");
-
-                    b.HasIndex("GrantedByResellerId");
-
-                    b.HasIndex("TenantId", "FeatureId")
-                        .IsUnique();
-
-                    b.ToTable("TenantFeatures", (string)null);
                 });
 
             modelBuilder.Entity("OcufiiAPI.Models.TenantPermission", b =>
@@ -1885,12 +1847,6 @@ namespace OcufiiAPI.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("OcufiiAPI.Models.PlatformAdmin", "GrantedByAdmin")
-                        .WithMany()
-                        .HasForeignKey("GrantedByAdminId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("OcufiiAPI.Models.Reseller", "Reseller")
                         .WithMany()
                         .HasForeignKey("ResellerId")
@@ -1898,8 +1854,6 @@ namespace OcufiiAPI.Migrations
                         .IsRequired();
 
                     b.Navigation("Feature");
-
-                    b.Navigation("GrantedByAdmin");
 
                     b.Navigation("Reseller");
                 });
@@ -1990,33 +1944,6 @@ namespace OcufiiAPI.Migrations
                         .IsRequired();
 
                     b.Navigation("AssignedReseller");
-                });
-
-            modelBuilder.Entity("OcufiiAPI.Models.TenantFeature", b =>
-                {
-                    b.HasOne("OcufiiAPI.Models.Feature", "Feature")
-                        .WithMany()
-                        .HasForeignKey("FeatureId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("OcufiiAPI.Models.Reseller", "GrantedByReseller")
-                        .WithMany()
-                        .HasForeignKey("GrantedByResellerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("OcufiiAPI.Models.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Feature");
-
-                    b.Navigation("GrantedByReseller");
-
-                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("OcufiiAPI.Models.TenantPermission", b =>

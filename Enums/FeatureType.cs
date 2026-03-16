@@ -4,6 +4,6 @@
     {
         Platform = 0,
         Reseller = 1,
-        Tenant = 2
+        PlanGated = 2
     }
 }

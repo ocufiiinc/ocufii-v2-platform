@@ -61,6 +61,7 @@ namespace OcufiiAPI.Models
         public User? Parent { get; set; }
         public ICollection<User> Dependents { get; set; } = new List<User>();
         public ICollection<UserFeature> UserFeatures { get; set; } = new List<UserFeature>();
-        public ICollection<DeviceToken> DeviceTokens { get; set; } = new List<DeviceToken>();       
+        public ICollection<DeviceToken> DeviceTokens { get; set; } = new List<DeviceToken>();
+        public ICollection<MembershipPermission> MembershipPermissions { get; set; } = new List<MembershipPermission>();
     }
 }

@@ -14,7 +14,6 @@
         public string LastName { get; set; } = string.Empty;
         public string PhoneNumber { get; set; } = string.Empty;
         public string? Company { get; set; }
-        public Guid? AssignedResellerId { get; set; }
         public bool AccountHold { get; set; } = false;
         public DateTime? SubscriptionDate { get; set; }
         public string? GtmInfo { get; set; }

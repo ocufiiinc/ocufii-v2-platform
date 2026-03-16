@@ -15,6 +15,8 @@ namespace OcufiiAPI.Models
         public bool FullAccess { get; set; } = false;
         public bool CanCreate { get; set; } = false;
         public bool CanDelete { get; set; } = false;
+        public Guid GrantedByAdminId { get; set; }  
+        public PlatformAdmin GrantedByAdmin { get; set; } = null!;  
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
