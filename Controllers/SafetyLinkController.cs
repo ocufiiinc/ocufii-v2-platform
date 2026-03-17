@@ -417,8 +417,8 @@ public class SafetyLinkController : ControllerBase
             .FirstOrDefaultAsync() ?? "unknown@email.com";
 
         var allLinks = await _safetyLinkRepo.Query()
-            .Where(l => (l.SenderId == userId || l.RecipientId == userId)
-                     && l.Status == SafetyLinkStatus.Accepted)
+            .Where(l => (l.SenderId == userId || l.RecipientId == userId) &&
+                        (l.Status == SafetyLinkStatus.Accepted || l.Status == SafetyLinkStatus.Pending))
             .Select(l => new
             {
                 LinkId = l.Id,
@@ -432,18 +432,18 @@ public class SafetyLinkController : ControllerBase
                 Snooze = l.Snooze,
                 SnoozeStartTime = l.SnoozeStartTime,
                 SnoozeEndTime = l.SnoozeEndTime,
-                IsOtpExpired = false,
+                IsOtpExpired = l.OTPExpiry != null && l.OTPExpiry < DateTime.UtcNow,
                 IsOutbound = l.SenderId == userId
             })
             .ToListAsync();
 
         var outbound = allLinks
-            .Where(l => l.IsOutbound)
+            .Where(l => l.IsOutbound)  // Both Accepted and Pending outgoing
             .Select(l => new LinkedMemberDto
             {
                 LinkId = l.LinkId,
-                Email = l.SenderEmail,       
-                LinkedEmail = l.RecipientEmail,   
+                Email = l.SenderEmail,          // My email (outbound sender)
+                LinkedEmail = l.RecipientEmail, 
                 AliasName = l.AliasName,
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
@@ -454,15 +454,17 @@ public class SafetyLinkController : ControllerBase
                 SnoozeEndTime = l.SnoozeEndTime,
                 IsOtpExpired = l.IsOtpExpired
             })
+            .OrderByDescending(l => l.Status == SafetyLinkStatus.Pending)
+            .ThenBy(l => l.AliasName)
             .ToList();
 
         var inbound = allLinks
-            .Where(l => !l.IsOutbound)
+            .Where(l => !l.IsOutbound && l.Status == SafetyLinkStatus.Accepted)
             .Select(l => new LinkedMemberDto
             {
                 LinkId = l.LinkId,
-                Email = l.RecipientEmail,        
-                LinkedEmail = l.SenderEmail,    
+                Email = l.RecipientEmail,     
+                LinkedEmail = l.SenderEmail, 
                 AliasName = l.AliasName,
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
@@ -475,9 +477,13 @@ public class SafetyLinkController : ControllerBase
             })
             .ToList();
 
-        return Ok(new ApiResponse(true, "Linked members retrieved")
+        return Ok(new ApiResponse(true, "Linked members and pending outgoing requests retrieved")
         {
-            Data = new { Outbound = outbound, Inbound = inbound },
+            Data = new
+            {
+                Outbound = outbound,
+                Inbound = inbound   
+            },
             ErrorCode = null
         });
     }

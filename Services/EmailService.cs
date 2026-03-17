@@ -37,5 +37,22 @@ namespace OcufiiAPI.Services
 
             await retryPolicy.ExecuteAsync(async () => await smtpClient.SendMailAsync(mailMessage));
         }
+
+        public async Task SendPasswordResetOtpAsync(string toEmail, string otp, int expiryMinutes = 120)
+        {
+            var subject = "Ocufii Password Reset OTP";
+
+            var body = $@"
+                <h2>Password Reset Request</h2>
+                <p>Hello,</p>
+                <p>You requested to reset your Ocufii account password.</p>
+                <p>Your one-time password (OTP) is: <strong>{otp}</strong></p>
+                <p><strong>This OTP is valid for {expiryMinutes} minutes.</strong> Please use it to reset your password.</p>
+                <p>Do not share this OTP with anyone. If you did not request this reset, please ignore this email or contact support immediately.</p>
+                <p>Best regards,<br/>Ocufii Team</p>
+            ";
+
+            await SendEmailAsync(toEmail, subject, body, isHtml: true);
+        }
     }
 }

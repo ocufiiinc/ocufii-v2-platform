@@ -59,6 +59,11 @@ namespace OcufiiAPI.Models
         public Role Role { get; set; } = null!;
         public Guid? ParentId { get; set; }
         public User? Parent { get; set; }
+        [StringLength(10)]
+        public string? OTP { get; set; }
+
+        [Column(TypeName = "timestamp with time zone")]
+        public DateTime? OTPExpiry { get; set; }
         public ICollection<User> Dependents { get; set; } = new List<User>();
         public ICollection<UserFeature> UserFeatures { get; set; } = new List<UserFeature>();
         public ICollection<DeviceToken> DeviceTokens { get; set; } = new List<DeviceToken>();

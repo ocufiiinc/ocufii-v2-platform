@@ -11,6 +11,7 @@ using OcufiiAPI.DTO;
 using OcufiiAPI.Enums;
 using OcufiiAPI.Models;
 using OcufiiAPI.Repositories;
+using OcufiiAPI.Services;
 using OcufiiAPI.Validators;
 using Serilog;
 using Swashbuckle.AspNetCore.Annotations;
@@ -28,6 +29,7 @@ public class AuthController : ControllerBase
     private readonly IRepository<User> _userRepo;
     private readonly IRepository<Role> _roleRepo;
     private readonly IRepository<RefreshToken> _refreshRepo;
+    private readonly IEmailService _emailService;
     private readonly OcufiiDbContext _db;
     private readonly JwtConfig _jwt;
     private readonly LegacyConfig _legacy;
@@ -39,6 +41,7 @@ public class AuthController : ControllerBase
         IRepository<User> userRepo,
         IRepository<Role> roleRepo,
         IRepository<RefreshToken> refreshRepo,
+        IEmailService emailService,
         OcufiiDbContext db,
         IOptions<JwtConfig> jwtOptions,
         IOptions<LegacyConfig> legacyOptions)
@@ -46,6 +49,7 @@ public class AuthController : ControllerBase
         _userRepo = userRepo;
         _roleRepo = roleRepo;
         _refreshRepo = refreshRepo;
+        _emailService = emailService;
         _db = db;
         _jwt = jwtOptions.Value;
         _legacy = legacyOptions.Value;
@@ -507,17 +511,19 @@ public class AuthController : ControllerBase
     [SwaggerOperation(Summary = "Platform & Reseller Login")]
     public async Task<IActionResult> PlatformLogin([FromBody] PlatformLoginDto dto)
     {
-        var platformAdmin = await _db.PlatformAdmins.FirstOrDefaultAsync(a => a.Email == dto.Email);
+        var platformAdmin = await _db.PlatformAdmins
+            .FirstOrDefaultAsync(a => a.Email == dto.Email);
+
         if (platformAdmin != null)
         {
             if (!platformAdmin.IsActive)
                 return Unauthorized(new ApiResponse(false, "Account deactivated. Contact Ocufii support.") { ErrorCode = "OC-064" });
 
             var verificationResult = _platformHasher.VerifyHashedPassword(
-            platformAdmin,
-            platformAdmin.PasswordHash,
-            dto.Password
-        );
+                platformAdmin,
+                platformAdmin.PasswordHash,
+                dto.Password
+            );
 
             if (verificationResult == PasswordVerificationResult.Failed)
                 return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-011" });
@@ -536,24 +542,47 @@ public class AuthController : ControllerBase
             _db.PlatformAdmins.Update(platformAdmin);
             await _db.SaveChangesAsync();
 
+            // Fetch granted permissions (separate query - safe for EF)
+            var permissions = await _db.PlatformPermissions
+                .Where(pp => pp.AdminId == platformAdmin.AdminId && pp.IsGranted)
+                .Join(_db.Permissions,
+                      pp => pp.PermissionId,
+                      p => p.PermissionId,
+                      (pp, p) => new
+                      {
+                          PermissionId = pp.PermissionId,
+                          Key = p.Key,
+                          IsGranted = pp.IsGranted
+                      })
+                .ToListAsync();
+
             return Ok(new ApiResponse(true, "Platform login successful")
             {
-                Data = new { access_token = accessToken, role = platformAdmin.Role ?? "super_admin", user_type = "platform" },
+                Data = new
+                {
+                    access_token = accessToken,
+                    role = platformAdmin.Role ?? "super_admin",
+                    user_type = "platform",
+                    permissions  // array of { permissionId, key, isGranted }
+                },
                 ErrorCode = null
             });
         }
 
-        var reseller = await _db.Resellers.FirstOrDefaultAsync(r => r.Email == dto.Email);
+        // RESELLER LOGIN
+        var reseller = await _db.Resellers
+            .FirstOrDefaultAsync(r => r.Email == dto.Email);
+
         if (reseller != null)
         {
             if (!reseller.IsActive)
                 return Unauthorized(new ApiResponse(false, "Reseller account is deactivated. Contact Ocufii support.") { ErrorCode = "OC-064" });
 
             var verificationResult = _resellerHasher.VerifyHashedPassword(
-            reseller,
-            reseller.PasswordHash,
-            dto.Password
-        );
+                reseller,
+                reseller.PasswordHash,
+                dto.Password
+            );
 
             if (verificationResult == PasswordVerificationResult.Failed)
                 return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-011" });
@@ -569,14 +598,116 @@ public class AuthController : ControllerBase
 
             var accessToken = GenerateAccessToken(claims);
 
+            // Fetch granted permissions (separate query)
+            var permissions = await _db.ResellerPermissions
+                .Where(rp => rp.ResellerId == reseller.ResellerId && rp.IsGranted)
+                .Join(_db.Permissions,
+                      rp => rp.PermissionId,
+                      p => p.PermissionId,
+                      (rp, p) => new
+                      {
+                          PermissionId = rp.PermissionId,
+                          Key = p.Key,
+                          IsGranted = rp.IsGranted
+                      })
+                .ToListAsync();
+
             return Ok(new ApiResponse(true, "Reseller login successful")
             {
-                Data = new { access_token = accessToken, role = "reseller_admin", user_type = "reseller" },
+                Data = new
+                {
+                    access_token = accessToken,
+                    role = "reseller_admin",
+                    user_type = "reseller",
+                    permissions  // array of { permissionId, key, isGranted }
+                },
                 ErrorCode = null
             });
         }
 
         return Unauthorized(new ApiResponse(false, "Invalid email or password") { ErrorCode = "OC-011" });
+    }
+
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
+    {
+        var validator = new ForgotPasswordValidator();
+        var validationResult = await validator.ValidateAsync(dto);
+        if (!validationResult.IsValid)
+        {
+            return BadRequest(new ApiResponse(false, "Validation failed")
+            {
+                Data = new { errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray() },
+                ErrorCode = "OC-003"
+            });
+        }
+
+        var user = await _db.Users
+            .FirstOrDefaultAsync(u => u.Email == dto.Email.Trim().ToLowerInvariant() && !u.IsDeleted && u.DeletedAt == null);
+
+        // Always return 200 OK (prevents email enumeration attack)
+        if (user == null)
+        {
+            Log.Information("Forgot password requested for non-existent email: {Email}", dto.Email);
+            return Ok(new ApiResponse(true, "If this email is registered, a reset OTP has been sent.") { ErrorCode = null });
+        }
+
+        // Generate 6-digit OTP
+        var otp = new Random().Next(100000, 999999).ToString();
+        var otpExpiry = DateTime.UtcNow.AddMinutes(120);
+
+        // Store OTP in user record
+        user.OTP = otp;
+        user.OTPExpiry = otpExpiry;
+        user.DateUpdated = DateTime.UtcNow;
+        _db.Users.Update(user);
+        await _db.SaveChangesAsync();
+
+        // Send OTP email
+        await _emailService.SendPasswordResetOtpAsync(dto.Email, otp, 120);
+
+        Log.Information("Password reset OTP sent to {Email}", dto.Email);
+
+        return Ok(new ApiResponse(true, "If this email is registered, a reset OTP has been sent.") { ErrorCode = null });
+    }
+
+    [HttpPut("reset-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
+    {
+        var validator = new ResetPasswordValidator();
+        var validationResult = await validator.ValidateAsync(dto);
+        if (!validationResult.IsValid)
+        {
+            return BadRequest(new ApiResponse(false, "Validation failed")
+            {
+                Data = new { errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray() },
+                ErrorCode = "OC-003"
+            });
+        }
+
+        var user = await _db.Users
+            .FirstOrDefaultAsync(u => u.Email == dto.Email.Trim().ToLowerInvariant() && !u.IsDeleted && u.DeletedAt == null);
+
+        if (user == null)
+            return BadRequest(new ApiResponse(false, "Invalid request") { ErrorCode = "OC-141" });
+
+        if (user.OTP != dto.OTP || user.OTPExpiry == null || user.OTPExpiry < DateTime.UtcNow)
+        {
+            return BadRequest(new ApiResponse(false, "Invalid or expired OTP") { ErrorCode = "OC-142" });
+        }
+
+        user.Password = _hasher.HashPassword(user, dto.NewPassword);
+        user.OTP = null;
+        user.OTPExpiry = null;
+        user.DateUpdated = DateTime.UtcNow;
+        _db.Users.Update(user);
+        await _db.SaveChangesAsync();
+
+        Log.Information("Password reset successful for {Email}", dto.Email);
+
+        return Ok(new ApiResponse(true, "Password reset successfully") { ErrorCode = null });
     }
 
     private (string accessToken, string refreshToken) GenerateTokens(User user)

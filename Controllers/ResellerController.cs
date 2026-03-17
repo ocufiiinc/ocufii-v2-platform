@@ -37,20 +37,33 @@ namespace OcufiiAPI.Controllers
                 return Unauthorized(new ApiResponse(false, "No permission to view tenants") { ErrorCode = "OC-121" });
 
             var resellerId = GetResellerId();
+
             var tenants = await _db.Tenants
                 .Where(t => t.AssignedResellerId == resellerId)
                 .Select(t => new
                 {
                     tenantId = t.TenantId,
-                    t.DateCreated,
-                    t.DateUpdated,
-                    t.IsActive,
-                    Status = t.IsActive ? "Active" : "Inactive",
-                    Permissions = _db.TenantPermissions
+                    dateCreated = t.DateCreated,
+                    dateUpdated = t.DateUpdated,
+                    isActive = t.IsActive,
+                    status = t.IsActive ? "Active" : "Inactive",
+
+                    email = _db.Users
+                        .Where(u => u.TenantId == t.TenantId && u.Role.RoleName == "account_owner")
+                        .Select(u => u.Email)
+                        .FirstOrDefault() ?? "No owner assigned",
+
+                    fullName = _db.Users
+                        .Where(u => u.TenantId == t.TenantId && u.Role.RoleName == "account_owner")
+                        .Select(u => (u.FirstName + " " + u.LastName).Trim())
+                        .FirstOrDefault() ?? "No owner assigned",
+
+                    permissions = _db.TenantPermissions
                         .Where(tp => tp.TenantId == t.TenantId)
                         .Join(_db.Permissions, tp => tp.PermissionId, p => p.PermissionId, (tp, p) => new { p.Key, tp.IsGranted })
                         .ToList(),
-                    Features = _db.TenantFeatures
+
+                    features = _db.TenantFeatures
                         .Where(tf => tf.TenantId == t.TenantId)
                         .Join(_db.Features, tf => tf.FeatureId, f => f.Id, (tf, f) => new { f.Key, tf.IsEnabled })
                         .ToList()

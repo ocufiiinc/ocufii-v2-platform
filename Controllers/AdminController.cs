@@ -725,11 +725,21 @@ namespace OcufiiAPI.Controllers
                 .Include(t => t.AssignedReseller)
                 .Select(t => new
                 {
-                    t.TenantId,
-                    t.DateCreated,
-                    t.DateUpdated,
-                    t.IsActive,
-                    CurrentResellerName = t.AssignedReseller != null ? t.AssignedReseller.Name : "Unassigned"
+                    tenantId = t.TenantId,
+                    dateCreated = t.DateCreated,
+                    dateUpdated = t.DateUpdated,
+                    isActive = t.IsActive,
+                    currentResellerName = t.AssignedReseller != null ? t.AssignedReseller.Name : "Unassigned",
+
+                    email = _db.Users
+                        .Where(u => u.TenantId == t.TenantId && u.Role.RoleName == "account_owner")
+                        .Select(u => u.Email)
+                        .FirstOrDefault() ?? "No owner assigned",
+
+                    fullName = _db.Users
+                        .Where(u => u.TenantId == t.TenantId && u.Role.RoleName == "account_owner")
+                        .Select(u => (u.FirstName + " " + u.LastName).Trim())
+                        .FirstOrDefault() ?? "No owner assigned"
                 })
                 .ToListAsync();
 

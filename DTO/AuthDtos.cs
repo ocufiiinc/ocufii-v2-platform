@@ -1,4 +1,6 @@
-﻿namespace OcufiiAPI.DTO
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace OcufiiAPI.DTO
 {
     public class LoginDto
     {
@@ -18,6 +20,27 @@
         public DateTime? SubscriptionDate { get; set; }
         public string? GtmInfo { get; set; }
         public string? UserName { get; set; }
+    }
+
+    public class ForgotPasswordDto
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+    }
+    public class ResetPasswordDto
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(6, MinimumLength = 6)]
+        public string OTP { get; set; } = string.Empty;
+
+        [Required]
+        [MinLength(8)]
+        public string NewPassword { get; set; } = string.Empty;
     }
 
     public class RefreshDto
