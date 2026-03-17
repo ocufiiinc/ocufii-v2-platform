@@ -451,21 +451,19 @@ namespace OcufiiAPI.Controllers
 
             try
             {
-                // Validate Permissions
                 if (dto.Permissions != null && dto.Permissions.Any())
                 {
                     var permissionIds = dto.Permissions.Select(p => p.PermissionId).Distinct().ToList();
 
-                    var validPermissions = await _db.Permissions
-                        .Where(p => permissionIds.Contains(p.PermissionId) && p.Category == "reseller")
-                        .Select(p => p.PermissionId)
-                        .ToListAsync();
+                    var validPermissionCount = await _db.Permissions
+                        .CountAsync(p => permissionIds.Contains(p.PermissionId) &&
+                                         (p.Category == "reseller" || p.Category == "account"));
 
-                    if (validPermissions.Count != permissionIds.Count)
+                    if (validPermissionCount != permissionIds.Count)
                     {
                         _db.Resellers.Remove(reseller);
                         await _db.SaveChangesAsync();
-                        return BadRequest(new ApiResponse(false, "One or more permission IDs are invalid or not from 'reseller' category") { ErrorCode = "OC-135" });
+                        return BadRequest(new ApiResponse(false, "One or more permission IDs are invalid or from disallowed category (only reseller or account allowed)") { ErrorCode = "OC-135" });
                     }
 
                     foreach (var p in dto.Permissions)
@@ -482,21 +480,20 @@ namespace OcufiiAPI.Controllers
                     }
                 }
 
-                // Validate Features
+                // Validate & Assign Features
                 if (dto.Features != null && dto.Features.Any())
                 {
                     var featureIds = dto.Features.Select(f => f.FeatureId).Distinct().ToList();
 
-                    var validFeatures = await _db.Features
-                        .Where(f => featureIds.Contains(f.Id) && (f.FeatureType == FeatureType.Reseller || f.FeatureType == FeatureType.PlanGated))
-                        .Select(f => f.Id)
-                        .ToListAsync();
+                    var validFeatureCount = await _db.Features
+                        .CountAsync(f => featureIds.Contains(f.Id) &&
+                                         (f.FeatureType == FeatureType.Reseller || f.FeatureType == FeatureType.PlanGated));
 
-                    if (validFeatures.Count != featureIds.Count)
+                    if (validFeatureCount != featureIds.Count)
                     {
                         _db.Resellers.Remove(reseller);
                         await _db.SaveChangesAsync();
-                        return BadRequest(new ApiResponse(false, "One or more feature IDs are invalid or not from allowed types (Reseller or Plan-Gated)") { ErrorCode = "OC-136" });
+                        return BadRequest(new ApiResponse(false, "One or more feature IDs are invalid or from disallowed type (only Reseller or Plan-Gated allowed)") { ErrorCode = "OC-136" });
                     }
 
                     foreach (var f in dto.Features)
@@ -576,13 +573,14 @@ namespace OcufiiAPI.Controllers
                 {
                     var permissionIds = dto.Permissions.Select(p => p.PermissionId).Distinct().ToList();
 
-                    var validPermissions = await _db.Permissions
-                        .Where(p => permissionIds.Contains(p.PermissionId) && p.Category == "reseller" || p.Category == "account")
-                        .Select(p => p.PermissionId)
-                        .ToListAsync();
+                    var validPermissionCount = await _db.Permissions
+                        .CountAsync(p => permissionIds.Contains(p.PermissionId) &&
+                                         (p.Category == "reseller" || p.Category == "account"));
 
-                    if (validPermissions.Count != permissionIds.Count)
-                        return BadRequest(new ApiResponse(false, "One or more permission IDs are invalid or not from 'reseller' category") { ErrorCode = "OC-135" });
+                    if (validPermissionCount != permissionIds.Count)
+                    {
+                        return BadRequest(new ApiResponse(false, "One or more permission IDs are invalid or from disallowed category (only reseller or account allowed)") { ErrorCode = "OC-135" });
+                    }
 
                     var oldPermissions = await _db.ResellerPermissions
                         .Where(rp => rp.ResellerId == resellerId)
@@ -609,13 +607,14 @@ namespace OcufiiAPI.Controllers
                 {
                     var featureIds = dto.Features.Select(f => f.FeatureId).Distinct().ToList();
 
-                    var validFeatures = await _db.Features
-                        .Where(f => featureIds.Contains(f.Id) && (f.FeatureType == FeatureType.Reseller || f.FeatureType == FeatureType.PlanGated))
-                        .Select(f => f.Id)
-                        .ToListAsync();
+                    var validFeatureCount = await _db.Features
+                        .CountAsync(f => featureIds.Contains(f.Id) &&
+                                         (f.FeatureType == FeatureType.Reseller || f.FeatureType == FeatureType.PlanGated));
 
-                    if (validFeatures.Count != featureIds.Count)
-                        return BadRequest(new ApiResponse(false, "One or more feature IDs are invalid or not from allowed types (Reseller or Plan-Gated)") { ErrorCode = "OC-136" });
+                    if (validFeatureCount != featureIds.Count)
+                    {
+                        return BadRequest(new ApiResponse(false, "One or more feature IDs are invalid or from disallowed type (only Reseller or Plan-Gated allowed)") { ErrorCode = "OC-136" });
+                    }
 
                     var oldFeatures = await _db.ResellerFeatures
                         .Where(rf => rf.ResellerId == resellerId)

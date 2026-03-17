@@ -48,5 +48,6 @@ namespace OcufiiAPI.DTO
         public DateTime? SnoozeStartTime { get; set; }
         public DateTime? SnoozeEndTime { get; set; }
         public bool IsOtpExpired { get; set; }
+        public string LinkedEmail { get; set; } = string.Empty;
     }
 }

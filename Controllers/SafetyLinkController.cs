@@ -410,10 +410,11 @@ public class SafetyLinkController : ControllerBase
     public async Task<ActionResult<ApiResponse>> GetLinkedMembers()
     {
         var userId = User.GetUserId();
+
         var myEmail = await _db.Users
-        .Where(u => u.UserId == userId)
-        .Select(u => u.Email)
-        .FirstOrDefaultAsync() ?? "unknown@email.com";
+            .Where(u => u.UserId == userId)
+            .Select(u => u.Email)
+            .FirstOrDefaultAsync() ?? "unknown@email.com";
 
         var allLinks = await _safetyLinkRepo.Query()
             .Where(l => (l.SenderId == userId || l.RecipientId == userId)
@@ -421,9 +422,8 @@ public class SafetyLinkController : ControllerBase
             .Select(l => new
             {
                 LinkId = l.Id,
-                OtherEmail = l.SenderId == userId
-                    ? _db.Users.Where(u => u.UserId == l.RecipientId).Select(u => u.Email).FirstOrDefault()
-                    : _db.Users.Where(u => u.UserId == l.SenderId).Select(u => u.Email).FirstOrDefault(),
+                SenderEmail = _db.Users.Where(u => u.UserId == l.SenderId).Select(u => u.Email).FirstOrDefault(),
+                RecipientEmail = _db.Users.Where(u => u.UserId == l.RecipientId).Select(u => u.Email).FirstOrDefault(),
                 AliasName = l.AliasName ?? "No alias set",
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
@@ -442,7 +442,8 @@ public class SafetyLinkController : ControllerBase
             .Select(l => new LinkedMemberDto
             {
                 LinkId = l.LinkId,
-                Email = myEmail,
+                Email = l.SenderEmail,       
+                LinkedEmail = l.RecipientEmail,   
                 AliasName = l.AliasName,
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
@@ -460,7 +461,8 @@ public class SafetyLinkController : ControllerBase
             .Select(l => new LinkedMemberDto
             {
                 LinkId = l.LinkId,
-                Email = l.OtherEmail,
+                Email = l.RecipientEmail,        
+                LinkedEmail = l.SenderEmail,    
                 AliasName = l.AliasName,
                 Status = l.Status,
                 EnableLocation = l.EnableLocation,
