@@ -309,7 +309,7 @@ namespace OcufiiAPI.Data
             modelBuilder.Entity<Tenant>(entity =>
             {
                 entity.ToTable("Tenants");
-                entity.HasKey(e => e.ResellerId);
+                entity.HasKey(e => e.TenantId);
                 entity.Property(e => e.ThemeConfig).HasColumnType("jsonb");
                 entity.Property(e => e.CustomWorkflows).HasColumnType("jsonb");
                 entity.Property(e => e.DateCreated).HasDefaultValueSql("now()");

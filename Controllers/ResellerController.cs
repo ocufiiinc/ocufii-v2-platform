@@ -41,17 +41,17 @@ namespace OcufiiAPI.Controllers
                 .Where(t => t.AssignedResellerId == resellerId)
                 .Select(t => new
                 {
-                    tenantId = t.ResellerId,
+                    tenantId = t.TenantId,
                     t.DateCreated,
                     t.DateUpdated,
                     t.IsActive,
                     Status = t.IsActive ? "Active" : "Inactive",
                     Permissions = _db.TenantPermissions
-                        .Where(tp => tp.TenantId == t.ResellerId)
+                        .Where(tp => tp.TenantId == t.TenantId)
                         .Join(_db.Permissions, tp => tp.PermissionId, p => p.PermissionId, (tp, p) => new { p.Key, tp.IsGranted })
                         .ToList(),
                     Features = _db.TenantFeatures
-                        .Where(tf => tf.TenantId == t.ResellerId)
+                        .Where(tf => tf.TenantId == t.TenantId)
                         .Join(_db.Features, tf => tf.FeatureId, f => f.Id, (tf, f) => new { f.Key, tf.IsEnabled })
                         .ToList()
                 })
@@ -182,7 +182,7 @@ namespace OcufiiAPI.Controllers
 
             var tenant = new Tenant
             {
-                ResellerId = Guid.NewGuid(),
+                TenantId = Guid.NewGuid(),
                 AssignedResellerId = resellerId,
                 DateCreated = DateTime.UtcNow,
                 DateUpdated = DateTime.UtcNow,
@@ -206,7 +206,7 @@ namespace OcufiiAPI.Controllers
                 PhoneNumber = dto.PhoneNumber,
                 Password = hash,
                 RoleId = (await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == "account_owner"))!.RoleId,
-                TenantId = tenant.ResellerId,
+                TenantId = tenant.TenantId,
                 IsEnabled = true,
                 IsDeleted = false,
                 DateSubmitted = DateTime.UtcNow,
@@ -247,7 +247,7 @@ namespace OcufiiAPI.Controllers
                     {
                         _db.TenantPermissions.Add(new TenantPermission
                         {
-                            TenantId = tenant.ResellerId,
+                            TenantId = tenant.TenantId,
                             PermissionId = p.PermissionId,
                             IsGranted = p.IsGranted,
                             GrantedByResellerId = resellerId,
@@ -282,7 +282,7 @@ namespace OcufiiAPI.Controllers
                     {
                         _db.TenantFeatures.Add(new TenantFeature
                         {
-                            TenantId = tenant.ResellerId,
+                            TenantId = tenant.TenantId,
                             FeatureId = f.FeatureId,
                             IsEnabled = f.IsEnabled,
                             GrantedByResellerId = resellerId,
@@ -294,9 +294,9 @@ namespace OcufiiAPI.Controllers
 
                 await _db.SaveChangesAsync();
 
-                return Created($"/reseller/my-tenants/{tenant.ResellerId}", new ApiResponse(true, "Tenant and account owner created")
+                return Created($"/reseller/my-tenants/{tenant.TenantId}", new ApiResponse(true, "Tenant and account owner created")
                 {
-                    Data = new { TenantId = tenant.ResellerId, OwnerUserId = owner.UserId, TemporaryPassword = tempPassword },
+                    Data = new { TenantId = tenant.TenantId, OwnerUserId = owner.UserId, TemporaryPassword = tempPassword },
                     ErrorCode = null
                 });
             }
@@ -317,7 +317,7 @@ namespace OcufiiAPI.Controllers
 
             var resellerId = GetResellerId();
             var tenant = await _db.Tenants
-                .FirstOrDefaultAsync(t => t.ResellerId == tenantId && t.AssignedResellerId == resellerId);
+                .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.AssignedResellerId == resellerId);
 
             if (tenant == null)
                 return NotFound(new ApiResponse(false, "Tenant not found or not assigned to this reseller") { ErrorCode = "OC-062" });
@@ -449,7 +449,7 @@ namespace OcufiiAPI.Controllers
                 return Unauthorized(new ApiResponse(false, "No permission to update tenant status") { ErrorCode = "OC-125" });
 
             var resellerId = GetResellerId();
-            var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId && t.AssignedResellerId == resellerId);
+            var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.TenantId == tenantId && t.AssignedResellerId == resellerId);
             if (tenant == null)
                 return NotFound(new ApiResponse(false, "Tenant not found") { ErrorCode = "OC-062" });
 
@@ -471,7 +471,7 @@ namespace OcufiiAPI.Controllers
                 return Unauthorized(new ApiResponse(false, "No permission to deactivate tenant") { ErrorCode = "OC-126" });
 
             var resellerId = GetResellerId();
-            var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.ResellerId == tenantId && t.AssignedResellerId == resellerId);
+            var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.TenantId == tenantId && t.AssignedResellerId == resellerId);
             if (tenant == null)
                 return NotFound(new ApiResponse(false, "Tenant not found") { ErrorCode = "OC-062" });
 

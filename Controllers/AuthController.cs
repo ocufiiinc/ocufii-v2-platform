@@ -190,7 +190,7 @@ public class AuthController : ControllerBase
 
         var newTenant = new Tenant
         {
-            ResellerId = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
             AssignedResellerId = assignedResellerId,
             DateCreated = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
@@ -213,7 +213,7 @@ public class AuthController : ControllerBase
             Username = dto.UserName ?? dto.Email.Split('@')[0],
             Password = _hasher.HashPassword(null!, dto.Password),
             RoleId = role.RoleId,
-            TenantId = newTenant.ResellerId,
+            TenantId = newTenant.TenantId,
             AccountHold = dto.AccountHold,
             DateSubmitted = DateTime.UtcNow,
             DateUpdated = DateTime.UtcNow,
@@ -245,7 +245,7 @@ public class AuthController : ControllerBase
             {
                 _db.TenantPermissions.Add(new TenantPermission
                 {
-                    TenantId = newTenant.ResellerId,
+                    TenantId = newTenant.TenantId,
                     PermissionId = permId,
                     IsGranted = true,  // default granted
                     GrantedByResellerId = assignedResellerId,
@@ -265,7 +265,7 @@ public class AuthController : ControllerBase
             {
                 _db.TenantFeatures.Add(new TenantFeature
                 {
-                    TenantId = newTenant.ResellerId,
+                    TenantId = newTenant.TenantId,
                     FeatureId = featureId,
                     IsEnabled = true,
                     GrantedByResellerId = assignedResellerId,

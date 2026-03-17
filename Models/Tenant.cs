@@ -6,7 +6,7 @@ namespace OcufiiAPI.Models
     public class Tenant
     {
         [Key]
-        public Guid ResellerId { get; set; } = Guid.NewGuid();
+        public Guid TenantId { get; set; } = Guid.NewGuid();
 
         [Column(TypeName = "timestamp with time zone")]
         public DateTime DateCreated { get; set; } = DateTime.UtcNow;

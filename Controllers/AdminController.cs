@@ -725,7 +725,7 @@ namespace OcufiiAPI.Controllers
                 .Include(t => t.AssignedReseller)
                 .Select(t => new
                 {
-                    t.ResellerId,
+                    t.TenantId,
                     t.DateCreated,
                     t.DateUpdated,
                     t.IsActive,
